@@ -5,12 +5,19 @@
 #   ./patch-nixpkgs   # inject custom patches into nixpkgs common.nix (idempotent)
 #   nix-build          # build
 #
-# Uses <nixpkgs> for the full package set — whichever channel is active locally
-# or set by the CI workflow (nixos-25.11). The chromium package files come from
-# our sparse checkout, which fetch-nixpkgs pulls from the same channel.
+# nixpkgs-pin.json is updated automatically by CI after each successful build
+# to record the exact nixpkgs commit used, so the derivation hash is identical
+# between CI and your local machine — allowing Cachix to serve the binary.
 
 let
-  pkgs = import <nixpkgs> { };
+  pin = builtins.fromJSON (builtins.readFile ./nixpkgs-pin.json);
+
+  nixpkgsSrc = builtins.fetchTarball {
+    url    = "https://github.com/NixOS/nixpkgs/archive/${pin.rev}.tar.gz";
+    sha256 = pin.sha256;
+  };
+
+  pkgs = import nixpkgsSrc { };
 
   # Our sparse-checked-out + patched chromium package directory.
   chromiumDir = ./nixpkgs/pkgs/applications/networking/browsers/chromium;

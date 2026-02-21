@@ -80,23 +80,52 @@ cachix create my-chromium
 cachix use my-chromium
 ```
 
-## Using the Cache
+## Using the Cachix Binary in NixOS
 
-```nix
-# In your NixOS configuration or ~/.config/nix/nix.conf:
-nix.settings = {
-  substituters = [ "https://my-chromium.cachix.org" ];
-  trusted-public-keys = [ "my-chromium.cachix.org-1:..." ];
-};
-```
+For Nix to fetch the pre-built binary from Cachix instead of compiling locally,
+the derivation hash computed on your machine must **exactly match** what CI built.
+This is guaranteed by `nixpkgs-pin.json`, which CI updates after each successful
+build to record the exact nixpkgs commit + sha256 it used.
 
-Then install with:
+**Workflow on your local machine:**
 
 ```bash
-nix-env -iA chromium -f https://github.com/<you>/chromium-mv2/archive/main.tar.gz
-# or in a NixOS configuration:
-# environment.systemPackages = [ (import (fetchTarball "...") {}) ];
+# 1. Pull the repo (gets the latest nixpkgs-pin.json from CI)
+git -C ~/sources/chromium-mv2 pull
+
+# 2. Fetch nixpkgs sparse checkout + patch it
+bash ~/sources/chromium-mv2/fetch-nixpkgs
+bash ~/sources/chromium-mv2/patch-nixpkgs
+
+# 3. nixos-rebuild will now fetch from Cachix instead of compiling
+sudo nixos-rebuild switch
 ```
+
+**`configuration.nix` snippet:**
+
+```nix
+{ config, pkgs, lib, ... }:
+
+let
+  # Import the custom Chromium — uses the exact same pinned nixpkgs as CI,
+  # so Cachix serves the pre-built binary instead of recompiling.
+  chromium-custom = import /home/namin/sources/chromium-mv2 { };
+in
+{
+  # Tell Nix to use your Cachix cache
+  nix.settings = {
+    substituters      = [ "https://namin.cachix.org" ];
+    trusted-public-keys = [ "namin.cachix.org-1:PASTE_PUBLIC_KEY_HERE" ];
+  };
+
+  environment.systemPackages = [ chromium-custom ];
+}
+```
+
+> **Why `nixpkgs-pin.json`?** If `default.nix` used `<nixpkgs>` (impure),
+> CI and your machine might evaluate against different nixpkgs channel snapshots,
+> producing different hashes — and Cachix would be a miss. The pin file locks
+> both to the identical commit, guaranteeing a cache hit.
 
 ## Why Direct nixpkgs Patching?
 
