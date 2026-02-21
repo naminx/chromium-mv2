@@ -1,0 +1,49 @@
+name: Build Chromium (on demand)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          # Sets <nixpkgs> to nixos-25.11 — same branch fetch-nixpkgs uses
+          nix_path: nixpkgs=channel:nixos-25.11
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "-source$"
+
+      - name: Fetch nixpkgs (sparse checkout)
+        run: bash fetch-nixpkgs
+
+      - name: Patch nixpkgs (inject custom patches into common.nix)
+        run: bash patch-nixpkgs
+
+      - name: Build Chromium
+        run: |
+          nix-build --no-out-link \
+            --option sandbox true \
+            --option narinfo-cache-negative-ttl 0
+
+      - name: Push result to Cachix
+        if: github.event_name != 'pull_request'
+        run: nix-build --no-out-link | cachix push ${{ vars.CACHIX_CACHE }}
+

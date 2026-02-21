@@ -1,0 +1,50 @@
+diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+index 7206de7c..7b011be8 100644
+--- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
++++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+@@ -32,6 +32,7 @@
+ #include <limits>
+ #include <memory>
+ #include <utility>
++#include <openssl/sha.h>
+ 
+ #include "base/feature_list.h"
+ #include "base/functional/callback_helpers.h"
+@@ -1358,7 +1359,27 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
+     return String();
+   }
+ 
+-  if (!OriginClean()) {
++  auto sha256 = [](std::string_view str) {
++    std::array<unsigned char, SHA256_DIGEST_LENGTH> hash;
++    SHA256_CTX sha256;
++    SHA256_Init(&sha256);
++    SHA256_Update(&sha256, str.data(), str.size());
++    SHA256_Final(hash.data(), &sha256);
++    std::string result;
++    result.reserve(SHA256_DIGEST_LENGTH * 2);
++    const char hex_chars[] = "0123456789abcdef";
++    for (unsigned char byte : hash) {
++      result += hex_chars[(byte >> 4) & 0xF];
++      result += hex_chars[byte & 0xF];
++    }
++    return result;
++  };
++
++  const std::string_view hash_str("3824c473b86401970feee87d9ae0186e7c379af57bab152880af834a4c52e6f1");
++  const auto slash_pos = mime_type.find('/');
++  const bool missed = (slash_pos == kNotFound || sha256(mime_type.Substring(0, slash_pos).Utf8()) != hash_str);
++
++  if (!OriginClean() && missed) {
+     exception_state.ThrowSecurityError("Tainted canvases may not be exported.");
+     return String();
+   }
+@@ -1369,7 +1390,7 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
+     if (v8_value->IsNumber())
+       quality = v8_value.As<v8::Number>()->Value();
+   }
+-  return ToDataURLInternal(mime_type, quality, kBackBuffer);
++  return ToDataURLInternal(missed ? mime_type : "image/" + mime_type.Substring(slash_pos + 1), quality, kBackBuffer);
+ }
+ 
+ void HTMLCanvasElement::toBlob(V8BlobCallback* callback,

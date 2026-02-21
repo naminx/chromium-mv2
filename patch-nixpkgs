@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMON_NIX="nixpkgs/pkgs/applications/networking/browsers/chromium/common.nix"
+
+if [ ! -f "$COMMON_NIX" ]; then
+  echo "ERROR: $COMMON_NIX not found. Run './fetch-nixpkgs' first." >&2
+  exit 1
+fi
+
+# Idempotency check: skip if already patched
+if grep -q '# BEGIN custom patches' "$COMMON_NIX"; then
+  echo "nixpkgs already patched, skipping."
+  exit 0
+fi
+
+# Build the repo root absolute path (works both locally and in CI)
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+# Collect all .patch files in ./patches/
+PATCH_LIST=""
+for p in "$REPO_ROOT"/patches/*.patch; do
+  patch_name="$(basename "$p")"
+  PATCH_LIST="${PATCH_LIST}      # Custom patch: ${patch_name}
+      \"\${builtins.path { path = ${REPO_ROOT}/patches/${patch_name}; name = \"${patch_name}\"; }}\"
+"
+done
+
+if [ -z "$PATCH_LIST" ]; then
+  echo "No patches found in ./patches/ — nothing to do."
+  exit 0
+fi
+
+# Replace the closing '    ];' of the patches list with '    ] ++ [ ...custom... ];'
+# so our patches are appended at the very end of the list.
+python3 - "$COMMON_NIX" "$PATCH_LIST" <<'PYEOF'
+import sys
+
+path = sys.argv[1]
+patch_list = sys.argv[2]
+
+with open(path) as f:
+    content = f.read()
+
+# Locate 'patches = [' then find the first '    ];\n' at the same indent level —
+# that is the semicolon-terminated closing bracket of the patches assignment.
+start = content.index("    patches = [")
+end   = content.index("    ];\n", start)
+
+# Replace '    ];\n' with '    ] ++ [\n  # custom patches\n  ...\n    ];\n'
+custom_block = (
+    "    ] ++ [\n"
+    "      # BEGIN custom patches\n"
+    + patch_list +
+    "      # END custom patches\n"
+    "    ];\n"
+)
+
+new_content = content[:end] + custom_block + content[end + len("    ];\n"):]
+
+with open(path, 'w') as f:
+    f.write(new_content)
+
+print(f"Patched {path}: appended custom patches at end of patches list.")
+PYEOF

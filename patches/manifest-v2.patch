@@ -1,0 +1,51 @@
+diff --git a/chrome/browser/extensions/extension_management_internal.h b/chrome/browser/extensions/extension_management_internal.h
+index 2a9a9765..8116b17f 100644
+--- a/chrome/browser/extensions/extension_management_internal.h
++++ b/chrome/browser/extensions/extension_management_internal.h
+@@ -189,7 +189,7 @@ struct GlobalSettings {
+   std::optional<std::vector<Manifest::Type>> allowed_types;
+ 
+   // An enum setting indicates if manifest v2 is allowed.
+-  ManifestV2Setting manifest_v2_setting = ManifestV2Setting::kDefault;
++  ManifestV2Setting manifest_v2_setting = ManifestV2Setting::kEnabled;
+ 
+   UnpublishedAvailability unpublished_availability_setting =
+       UnpublishedAvailability::kAllowUnpublished;
+diff --git a/extensions/browser/extension_prefs.cc b/extensions/browser/extension_prefs.cc
+index 2011e11e..e311c12b 100644
+--- a/extensions/browser/extension_prefs.cc
++++ b/extensions/browser/extension_prefs.cc
+@@ -1,4 +1,4 @@
+-// Copyright 2014 The Chromium Authors
++// Copyright 2025 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+@@ -2235,7 +2235,7 @@ void ExtensionPrefs::RegisterProfilePrefs(
+   registry->RegisterDictionaryPref(pref_names::kExtensionManagement);
+   registry->RegisterDictionaryPref(pref_names::kOAuthRedirectUrls);
+   registry->RegisterListPref(pref_names::kAllowedTypes);
+-  registry->RegisterIntegerPref(pref_names::kManifestV2Availability, 0);
++  registry->RegisterIntegerPref(pref_names::kManifestV2Availability, 2);
+   registry->RegisterListPref(pref_names::kAllowedInstallSites);
+   registry->RegisterStringPref(pref_names::kLastChromeVersion, std::string());
+   registry->RegisterDictionaryPref(kInstallSignature);
+diff --git a/extensions/common/extension.cc b/extensions/common/extension.cc
+index 887589b2..396b9ef1 100644
+--- a/extensions/common/extension.cc
++++ b/extensions/common/extension.cc
+@@ -1,4 +1,4 @@
+-// Copyright 2013 The Chromium Authors
++// Copyright 2025 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+@@ -62,7 +62,7 @@ constexpr int kPEMOutputColumns = 64;
+ static_assert(kMaximumSupportedManifestVersion >=
+                   kMinimumSupportedManifestVersion,
+               "The modern manifest version must be supported.");
+-bool g_silence_deprecated_manifest_version_warnings = false;
++bool g_silence_deprecated_manifest_version_warnings = true;
+ 
+ // KEY MARKERS
+ constexpr char kKeyBeginHeaderMarker[] = "-----BEGIN";

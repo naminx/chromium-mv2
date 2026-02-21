@@ -1,0 +1,95 @@
+name: Check and Build Chromium
+
+on:
+  # Run on a schedule — twice a week is plenty for a branch updated 2-3x/month
+  schedule:
+    - cron: '0 3 * * 1,4'   # Every Monday and Thursday at 03:00 UTC
+  workflow_dispatch:         # Also allow manual trigger
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.compare.outputs.should_build }}
+      new_version:  ${{ steps.compare.outputs.new_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch nixpkgs (sparse checkout)
+        run: bash fetch-nixpkgs
+
+      - name: Compare Chromium version
+        id: compare
+        run: |
+          NEW_VERSION=$(python3 -c "
+          import json
+          with open('nixpkgs/pkgs/applications/networking/browsers/chromium/info.json') as f:
+              print(json.load(f)['chromium']['version'])
+          ")
+          LAST_VERSION=$(cat last-built-version | tr -d '[:space:]')
+
+          echo "Current version in nixpkgs : $NEW_VERSION"
+          echo "Last built version         : $LAST_VERSION"
+
+          if [ "$NEW_VERSION" != "$LAST_VERSION" ]; then
+            echo "New Chromium version detected — will build."
+            echo "should_build=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "Chromium version unchanged — skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-25.11
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Push all build outputs, not just the final chromium derivation.
+          # This caches LLVM, Rust, and other heavy dependencies so future
+          # builds skip recompiling them.
+          pushFilter: "-source$"
+
+      - name: Fetch nixpkgs (sparse checkout)
+        run: bash fetch-nixpkgs
+
+      - name: Patch nixpkgs (inject custom patches into common.nix)
+        run: bash patch-nixpkgs
+
+      - name: Build Chromium
+        run: |
+          nix-build --no-out-link \
+            --option sandbox true \
+            --option narinfo-cache-negative-ttl 0
+
+      - name: Push result to Cachix
+        run: nix-build --no-out-link | cachix push ${{ vars.CACHIX_CACHE }}
+
+      - name: Update last-built-version
+        run: |
+          NEW_VERSION="${{ needs.check-version.outputs.new_version }}"
+          echo "$NEW_VERSION" > last-built-version
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last-built-version
+          git commit -m "chore: built Chromium $NEW_VERSION"
+          git push
