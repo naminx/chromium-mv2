@@ -25,7 +25,7 @@ let
   # Collect our local patches
   patchPaths = builtins.attrNames (builtins.readDir ./patches);
   validPatches = builtins.filter (n: builtins.match ".*\\.patch" n != null) patchPaths;
-  formatPatch = name: "      \"${./patches + "/${name}"}\"";
+  formatPatch = name: "      ./custom-patches/${name}";
   patchListStr = builtins.concatStringsSep "\n" (map formatPatch validPatches);
 
   # Dynamically copy Chromium package logic and inject our patches via IFD
@@ -35,6 +35,8 @@ let
   } ''
     cp -r ${nixpkgsSrc}/pkgs/applications/networking/browsers/chromium $out
     chmod -R +w $out
+
+    cp -r ${./patches} $out/custom-patches
 
     python3 - $out/common.nix <<'PYEOF'
     import sys, os
