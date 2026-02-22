@@ -45,15 +45,12 @@ jobs:
           echo "Pinned nixpkgs to $REV (sha256: $SHA256)"
 
       - name: Build Chromium
-        run: |
-          nix-build --no-out-link \
-            --option sandbox true \
-            --option narinfo-cache-negative-ttl 0
+        run: nix build .#default -L --cores 0 --max-jobs auto
 
       - name: Push result to Cachix
         if: github.event_name != 'pull_request'
         run: |
-          nix-build --no-out-link | cachix push ${{ vars.CACHIX_CACHE }}
+          cachix push ${{ vars.CACHIX_CACHE }} result
           
           REV=$(python3 -c "import json; print(json.load(open('nixpkgs-pin.json'))['rev'])")
           NEW_VERSION=$(curl -s "https://raw.githubusercontent.com/NixOS/nixpkgs/${REV}/pkgs/applications/networking/browsers/chromium/info.json" | python3 -c "import sys, json; print(json.load(sys.stdin)['chromium']['version'])")

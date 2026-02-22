@@ -76,13 +76,10 @@ jobs:
           echo "Pinned nixpkgs to $REV (sha256: $SHA256)"
 
       - name: Build Chromium
-        run: |
-          nix-build --no-out-link \
-            --option sandbox true \
-            --option narinfo-cache-negative-ttl 0
+        run: nix build .#default -L --cores 0 --max-jobs auto
 
       - name: Push result to Cachix
-        run: nix-build --no-out-link | cachix push ${{ vars.CACHIX_CACHE }}
+        run: cachix push ${{ vars.CACHIX_CACHE }} result
 
       - name: Update last-built-version and nixpkgs-pin.json
         run: |
@@ -91,5 +88,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last-built-version nixpkgs-pin.json
-          git commit -m "chore: built Chromium $NEW_VERSION [nixpkgs pinned]"
+          git commit -m "chore: built Chromium $NEW_VERSION [nixpkgs pinned] [skip ci]"
           git push

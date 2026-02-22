@@ -1,0 +1,1 @@
+/home/namin/nixos/flake.nix
