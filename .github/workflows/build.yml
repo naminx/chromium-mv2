@@ -31,12 +31,10 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "-source$"
 
-      - name: Fetch nixpkgs (sparse checkout)
-        run: bash fetch-nixpkgs
-
       - name: Pin nixpkgs rev and sha256 into nixpkgs-pin.json
         run: |
-          REV=$(cat nixpkgs/.git/refs/heads/nixos-25.11)
+          # Fetch the latest commit for the nixos-25.11 channel
+          REV=$(git ls-remote https://github.com/NixOS/nixpkgs refs/heads/nixos-25.11 | awk '{print $1}')
           URL="https://github.com/NixOS/nixpkgs/archive/${REV}.tar.gz"
           SHA256=$(nix-prefetch-url --unpack "$URL" 2>/dev/null)
           python3 -c "
@@ -45,9 +43,6 @@ jobs:
           print(json.dumps(pin, indent=2) + '\n')
           " "$REV" "$SHA256" > nixpkgs-pin.json
           echo "Pinned nixpkgs to $REV (sha256: $SHA256)"
-
-      - name: Patch nixpkgs (inject custom patches into common.nix)
-        run: bash patch-nixpkgs
 
       - name: Build Chromium
         run: |

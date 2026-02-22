@@ -17,17 +17,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch nixpkgs (sparse checkout)
-        run: bash fetch-nixpkgs
-
       - name: Compare Chromium version
         id: compare
         run: |
-          NEW_VERSION=$(python3 -c "
-          import json
-          with open('nixpkgs/pkgs/applications/networking/browsers/chromium/info.json') as f:
-              print(json.load(f)['chromium']['version'])
-          ")
+          REV=$(git ls-remote https://github.com/NixOS/nixpkgs refs/heads/nixos-25.11 | awk '{print $1}')
+          NEW_VERSION=$(curl -s "https://raw.githubusercontent.com/NixOS/nixpkgs/${REV}/pkgs/applications/networking/browsers/chromium/info.json" | python3 -c "import sys, json; print(json.load(sys.stdin)['chromium']['version'])")
           LAST_VERSION=$(cat last-built-version | tr -d '[:space:]')
 
           echo "Current version in nixpkgs : $NEW_VERSION"
@@ -69,12 +63,9 @@ jobs:
           # builds skip recompiling them.
           pushFilter: "-source$"
 
-      - name: Fetch nixpkgs (sparse checkout)
-        run: bash fetch-nixpkgs
-
       - name: Pin nixpkgs rev and sha256 into nixpkgs-pin.json
         run: |
-          REV=$(cat nixpkgs/.git/refs/heads/nixos-25.11)
+          REV=$(git ls-remote https://github.com/NixOS/nixpkgs refs/heads/nixos-25.11 | awk '{print $1}')
           URL="https://github.com/NixOS/nixpkgs/archive/${REV}.tar.gz"
           SHA256=$(nix-prefetch-url --unpack "$URL" 2>/dev/null)
           python3 -c "
@@ -83,9 +74,6 @@ jobs:
           print(json.dumps(pin, indent=2) + '\n')
           " "$REV" "$SHA256" > nixpkgs-pin.json
           echo "Pinned nixpkgs to $REV (sha256: $SHA256)"
-
-      - name: Patch nixpkgs (inject custom patches into common.nix)
-        run: bash patch-nixpkgs
 
       - name: Build Chromium
         run: |
