@@ -3,6 +3,13 @@
 # Temporarily stage the secrets file so Nix can access it during the build
 git -C ~/nixos add -f ~/nixos/secrets.json
 
+# Output the exact derivation path of the upstream Chromium-MV2 package before rebuilding
+echo "🔍 Target Chromium-MV2 drvPath (from GitHub):"
+nix eval github:naminx/chromium-mv2#default.drvPath
+echo "🔍 Resolved Chromium-MV2 drvPath (from Local NixOS Flake):"
+nix eval ~/nixos#nixosConfigurations.nixos.pkgs.chromium-mv2.drvPath
+
+
 # The 'if' statement directly checks the exit code of the nixos-rebuild command.
 # The code inside this block will only run if the command succeeds (returns exit code 0).
 if sudo nice -n 19 nixos-rebuild switch --flake ~/nixos\#nixos --option log-lines 1000

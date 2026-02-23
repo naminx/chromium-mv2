@@ -10,15 +10,11 @@
 # to record the exact nixpkgs commit used, ensuring the derivation hash matches
 # between CI and your local machine, allowing Cachix to serve the binary.
 
-{ system ? builtins.currentSystem, ... }:
+{ system ? builtins.currentSystem, pkgsSrc ? null, ... }:
 
 let
-  pin = builtins.fromJSON (builtins.readFile ./nixpkgs-pin.json);
-
-  nixpkgsSrc = builtins.fetchTarball {
-    url    = "https://github.com/NixOS/nixpkgs/archive/${pin.rev}.tar.gz";
-    sha256 = pin.sha256;
-  };
+  # Fallback to fetching the latest stable nixos-25.11 if NOT imported explicitly via flake.nix
+  nixpkgsSrc = if pkgsSrc != null then pkgsSrc else builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-25.11.tar.gz";
 
   pkgs = import nixpkgsSrc { inherit system; };
 
