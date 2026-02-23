@@ -36,7 +36,7 @@ let
     cp -r ${nixpkgsSrc}/pkgs/applications/networking/browsers/chromium $out
     chmod -R +w $out
 
-    cp -r ${./patches} $out/custom-patches
+    cp -r ${builtins.path { name = "chromium-patches"; path = ./patches; }} $out/custom-patches
 
     python3 - $out/common.nix <<'PYEOF'
     import sys, os
