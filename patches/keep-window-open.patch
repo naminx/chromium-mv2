@@ -2,16 +2,6 @@ diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/
 index b36ea0c4..4f5536c4 100644
 --- a/chrome/browser/ui/tabs/tab_strip_model.cc
 +++ b/chrome/browser/ui/tabs/tab_strip_model.cc
-@@ -1253,6 +1253,9 @@ void TabStripModel::CloseAllTabs() {
-   ReentrancyCheck reentrancy_check(&reentrancy_guard_);
- 
-   // Set state so that observers can adjust their behavior to suit this
-+  // Keep window open: create new tab before closing all
-+  if (count() > 0)
-+    delegate()->AddTabAt(GURL(), -1, true);
-   // specific condition when CloseWebContentsAt causes a flurry of
-   // Close/Detach/Select notifications to be sent.
-   closing_all_ = true;
 @@ -1304,6 +1307,9 @@ void TabStripModel::CloseAllTabsInGroupImpl(
  
  void TabStripModel::CloseWebContentsAt(int index, uint32_t close_types) {
