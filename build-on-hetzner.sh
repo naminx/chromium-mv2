@@ -81,7 +81,7 @@ ssh -o StrictHostKeyChecking=accept-new root@$HETZNER_IP << EOF
     cachix authtoken "$CACHIX_TOKEN"
 
     echo "🏗️ Fetching your GitHub Flake and Building Chromium! (1.5 - 2 hours)..."
-    nix build github:naminx/chromium-mv2#default \
+    nix build --refresh github:naminx/chromium-mv2#default \
         -L --print-out-paths \
     | cachix push namin
 
