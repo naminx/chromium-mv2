@@ -1,4 +1,3 @@
-nixpkgs/
+# Nix Build Artifacts
 result
 result-*
-system-flake.nix
