@@ -2,12 +2,14 @@
 set -e
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: ./build-on-hetzner.sh <HETZNER_IP> <CACHIX_TOKEN>"
+    echo "Usage: ./build-on-hetzner.sh <HETZNER_IP> <CACHIX_TOKEN> [HETZNER_API_TOKEN]"
+    echo "  (If API token is provided, server will SELF-DESTRUCT when finished!)"
     exit 1
 fi
 
 HETZNER_IP="$1"
 CACHIX_TOKEN="$2"
+HETZNER_API="$3"
 
 echo "====================================================================="
 echo "🚨 CRITICAL REMINDER BEFORE PROCEEDING 🚨"
@@ -80,11 +82,42 @@ ssh -o StrictHostKeyChecking=accept-new root@$HETZNER_IP << EOF
     nix profile install nixpkgs#cachix || true
     cachix authtoken "$CACHIX_TOKEN"
 
-    echo "🏗️ Fetching your GitHub Flake and Building Chromium! (1.5 - 2 hours)..."
-    nix build --refresh github:naminx/chromium-mv2#default \
-        -L --print-out-paths \
-    | cachix push namin
+    echo "🏗️ Preparing autonomous detached build script..."
+    cat << 'INNERSCRIPT' > /root/autonomous_build.sh
+#!/usr/bin/env bash
+# Source Nix daemon
+. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 
+echo "======================================"
+echo "Starting Chromium Build at \$(date)"
+echo "======================================"
+
+if nix build --refresh github:naminx/chromium-mv2#default -L --print-out-paths | cachix push namin; then
     echo "🎉 SUCCESS: The Chromium binary was seamlessly pushed to Cachix!"
-    echo "🛑 STOP RECORDING BILLING: Go to console.hetzner.cloud and DELETE this server immediately!"
+    if [ -n "$HETZNER_API" ]; then
+        echo "💥 Self-destructing server..."
+        SERVER_ID=\$(curl -s http://169.254.169.254/hetzner/v1/metadata/instance-id)
+        curl -X DELETE -H "Authorization: Bearer $HETZNER_API" "https://api.hetzner.cloud/v1/servers/\$SERVER_ID"
+    fi
+else
+    echo "❌ BUILD FAILED!"
+fi
+INNERSCRIPT
+
+    chmod +x /root/autonomous_build.sh
+
+    echo "🚀 Launching autonomous build in the background (nohup)..."
+    nohup /root/autonomous_build.sh > /var/log/build.log 2>&1 &
+
+    echo "====================================================================="
+    echo "✅ The compiler has been successfully detached and is running!"
+    echo "You can now safely close your laptop or press Ctrl+C without killing the build."
+    echo "To monitor the build progress at any time, run:"
+    echo "👉 ./tail-hetzner.sh $HETZNER_IP"
+    if [ -n "$HETZNER_API" ]; then
+        echo "💥 API TOKEN DETECTED: The server will AUTOMATICALLY DELETE ITSELF when finished!"
+    else
+        echo "🛑 NO API TOKEN: You MUST delete the server manually from the Hetzner dashboard when done!"
+    fi
+    echo "====================================================================="
 EOF
