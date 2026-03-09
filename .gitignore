@@ -1,3 +1,6 @@
 # Nix Build Artifacts
 result
 result-*
+
+# direnv cache
+.direnv/
