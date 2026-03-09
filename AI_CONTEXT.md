@@ -19,6 +19,7 @@ When interacting with this system or writing testable terminal commands, keep th
 - **DO NOT** attempt to run `git commit` as a background tool! The GPG pinentry prompt will permanently freeze the background AI execution runner since it cannot natively see the screen to securely enter the passphrase or access the interactive UI.
 - Similarly, standard terminal commands that invoke a pager like `less` or `bat` (e.g., `git log`, `git diff`, `git status`) may hang AI execution loops forever. You must use `--no-pager`, pipe them to a file/`command cat`, or terminate the command explicitly.
 - For git work: Always stage your changes remotely using your file writer tools or `git add`, and then explicitly ask the user to manually run the `git commit` and `push` commands themselves directly in their active terminal.
+- **Chained Command Signal Loss:** Never chain more than 2 commands together with `&&` in a single `run_command` call. When chained commands take longer than the `WaitMsBeforeAsync` threshold, the entire job is backgrounded and the VS Code shell-integration "command done" signal fires unreliably, causing `command_status` to report `RUNNING` indefinitely even though the real process has already exited. Always break complex sequential work into multiple separate `run_command` calls.
 
 ## 4. Hardware Profiles & Architecture
 - **Target Machine:** Intel Core i3-12100 (4 cores). Heavy C++ compilation tasks (like building `chromium` or LLVM from scratch) will take approximately ~6 hours locally if there is a cache miss.
