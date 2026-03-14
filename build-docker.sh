@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# build-docker.sh — Incrementally build Chromium using Docker/Podman.
+# build-docker.sh — Cross-compile Chromium for Windows using Docker/Podman.
 #
 # Usage:
 #   ./build-docker.sh <CHROMIUM_VERSION>
 #   ./build-docker.sh 145.0.7632.116
+#
+# Produces: mini_installer.exe (Windows x64 installer)
 #
 # On the first run, this fetches the full Chromium source (~30 GB) and builds
 # from scratch. Subsequent runs only recompile changed files (minutes, not hours).
@@ -19,13 +21,16 @@ PATCHES_DIR="$SCRIPT_DIR/patches"
 IMAGE_NAME="chromium-mv2-builder"
 VOLUME_NAME="chromium-mv2-src"
 
-# Prefer podman for rootless operation; fall back to docker.
-if command -v podman &>/dev/null; then
+# Prefer docker (already installed); fall back to podman.
+if command -v docker &>/dev/null; then
+    DOCKER=docker
+    echo "🐳 Using Docker"
+elif command -v podman &>/dev/null; then
     DOCKER=podman
     echo "🐳 Using Podman (rootless)"
 else
-    DOCKER=docker
-    echo "🐳 Using Docker"
+    echo "❌ Neither docker nor podman found. Install one and retry."
+    exit 1
 fi
 
 # ── Build the base image (cached after first run) ────────────────────────────
@@ -33,7 +38,7 @@ echo "📦 Ensuring base image '$IMAGE_NAME' exists..."
 if ! $DOCKER image inspect "$IMAGE_NAME" &>/dev/null; then
     echo "🔨 Building base image (first time only — installs Chromium build deps)..."
     $DOCKER build --tag "$IMAGE_NAME" - << 'DOCKERFILE'
-FROM ubuntu:22.04
+FROM docker.io/library/ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 LABEL description="Chromium incremental build environment"
 
@@ -68,7 +73,7 @@ echo "   Source volume : $VOLUME_NAME (persistent)"
 echo "   Patches dir   : $PATCHES_DIR"
 echo ""
 
-$DOCKER run --rm -it \
+$DOCKER run --rm -i \
     --name "chromium-mv2-build-$(date +%s)" \
     -v "${VOLUME_NAME}:/chromium" \
     -v "${PATCHES_DIR}:/patches:ro" \
@@ -86,10 +91,17 @@ echo "════════════════════════�
 cd /chromium
 
 # ── First-time source fetch ───────────────────────────────────────────────────
-if [ ! -d "src" ]; then
+if [ ! -f ".gclient" ]; then
     echo ""
     echo "📥 First run: fetching Chromium source tree (~30 GB). Grab a coffee..."
     fetch --nohooks chromium
+fi
+
+# If fetch was interrupted so early that 'src/' wasn't even created,
+# running a baseline gclient sync will clone it.
+if [ ! -d "src" ]; then
+    echo "🔄 Recovering partial checkout..."
+    gclient sync --nohooks
 fi
 
 cd src
@@ -100,7 +112,13 @@ echo "🔄 Syncing to version $CHROMIUM_VERSION..."
 git fetch --tags --quiet
 git checkout "$CHROMIUM_VERSION" --quiet
 
-# gclient sync brings in all third-party deps for this exact version
+# Ensure .gclient declares target_os = ['win'] for the Windows cross-toolchain
+if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
+    echo "target_os = ['win']" >> /chromium/.gclient
+    echo "✅ Added target_os = ['win'] to .gclient"
+fi
+
+# gclient sync fetches Windows SDK + all third-party deps for this exact version
 gclient sync \
     --nohooks \
     --with_branch_heads \
@@ -111,14 +129,14 @@ gclient sync \
 
 echo "✅ Source synced to $CHROMIUM_VERSION"
 
-# ── Install / update build dependencies via the official helper ───────────────
-# This is idempotent; it only installs missing packages.
+# ── Install / update Linux host build dependencies ───────────────────────────
+# These are the *host* tools needed to run the cross-compiler itself.
 if [ ! -f /tmp/.deps_installed ]; then
     echo ""
-    echo "📦 Installing build dependencies (first run only)..."
-    ./build/install-build-deps.sh --no-prompt --no-chromeos-fonts
+    echo "📦 Installing Linux host build dependencies (first run only)..."
+    ./build/install-build-deps.sh --no-prompt --no-chromeos-fonts --no-arm
     touch /tmp/.deps_installed
-    # Hooks need running after dep install
+    # Hooks set up the Windows cross-toolchain (clang, lld, rc.exe etc.)
     gclient runhooks --quiet
 fi
 
@@ -136,10 +154,11 @@ for patch in /patches/*.patch; do
     patch -p1 < "$patch"
 done
 
-# ── Generate / refresh build configuration ───────────────────────────────────
+# ── Generate / refresh build configuration (Windows cross-compile) ───────────
 echo ""
-echo "⚙️  Configuring build (gn gen)..."
+echo "⚙️  Configuring Windows cross-compile build (gn gen)..."
 GN_ARGS='
+    target_os = "win"
     is_debug = false
     is_official_build = true
     symbol_level = 0
@@ -149,21 +168,24 @@ GN_ARGS='
     proprietary_codecs = true
     ffmpeg_branding = "Chrome"
 '
-gn gen out/Release --args="$GN_ARGS"
+gn gen out/win --args="$GN_ARGS"
 
 # ── Incremental compile ───────────────────────────────────────────────────────
 echo ""
-echo "🏗️  Building (incremental — only changed files will recompile)..."
+echo "🏗️  Building mini_installer.exe (incremental — only changed files will recompile)..."
 CPU_COUNT=$(nproc)
-ninja -C out/Release chrome -j${CPU_COUNT}
+ninja -C out/win mini_installer -j${CPU_COUNT}
 
 echo ""
 echo "════════════════════════════════════════════════════"
-echo " ✅ SUCCESS! Chrome binary is at:"
-echo "    (inside volume) /chromium/src/out/Release/chrome"
+echo " ✅ SUCCESS! Windows installer is at:"
+echo "    (inside volume) /chromium/src/out/win/mini_installer.exe"
 echo ""
-echo " To copy it out of the volume, run:"
-echo "   docker run --rm -v ${VOLUME_NAME}:/chromium -v \$(pwd):/out ubuntu:22.04 \\"
-echo '     cp /chromium/src/out/Release/chrome /out/'
+echo " To copy it to your current directory, run:"
+echo "   docker run --rm \\"
+echo "     -v chromium-mv2-src:/chromium \\"
+echo "     -v \$(pwd):/out \\"
+echo "     docker.io/library/ubuntu:22.04 \\"
+echo '     cp /chromium/src/out/win/mini_installer.exe /out/'
 echo "════════════════════════════════════════════════════"
 INNER

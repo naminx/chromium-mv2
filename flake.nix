@@ -15,16 +15,14 @@
       pkgsSrc = nixpkgs;
     };
 
-    # Run `nix develop` to get a shell with podman for the Docker build workflow.
+    # Run `nix develop` to get a shell with build tooling.
     devShells.x86_64-linux.default = pkgs.mkShell {
       packages = [
-        pkgs.podman
         pkgs.bash
         pkgs.coreutils
       ];
       shellHook = ''
-        echo "🐳 Podman $(podman --version) ready."
-        echo "   Run: ./build-docker.sh <CHROMIUM_VERSION>"
+        echo "🐳 Build shell ready. Run: ./build-docker.sh <CHROMIUM_VERSION>"
       '';
     };
   };
