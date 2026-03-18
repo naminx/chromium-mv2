@@ -4,3 +4,7 @@ result-*
 
 # direnv cache
 .direnv/
+42b5b0689e.zip
+mini_installer-*.exe
+packager_output.log
+test_write.txt

@@ -11,6 +11,9 @@ HETZNER_IP="$1"
 CACHIX_TOKEN="$2"
 HETZNER_API="$3"
 
+# Ephemeral servers: don't pollute ~/.ssh/known_hosts or show "Permanently added" warnings.
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
 echo "====================================================================="
 echo "🚨 CRITICAL REMINDER BEFORE PROCEEDING 🚨"
 echo "Because you are building 'github:naminx/chromium-mv2' remotely, the"
@@ -55,7 +58,7 @@ echo "🚀 Connecting to Hetzner Cloud server ($HETZNER_IP)..."
 
 # SSH into the server and pipe the entire installation and build process
 # directly into the remote shell! No rsync required.
-ssh -o StrictHostKeyChecking=accept-new root@$HETZNER_IP << EOF
+ssh $SSH_OPTS root@$HETZNER_IP << EOF
     set -e
 
     echo "⚙️ Setting up 16GB Swap Space..."
