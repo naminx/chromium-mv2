@@ -144,7 +144,7 @@ DAEMONJSON
         'echo "======================================"' \
         '' \
         'cd /root/chromium-mv2' \
-        "if ./build-docker.sh \"$CHROMIUM_VERSION\"; then" \
+        "if ./build-docker.sh \"$CHROMIUM_VERSION\" --shallow; then" \
         '    echo "🎉 SUCCESS: The Windows Chromium binary has been successfully cross-compiled!"' \
         "    echo \"It is located at /root/chromium-mv2/mini_installer-${CHROMIUM_VERSION}.exe\"" \
         'else' \

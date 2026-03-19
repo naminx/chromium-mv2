@@ -16,6 +16,8 @@
 set -e
 
 CHROMIUM_VERSION="${1:?Usage: $0 <CHROMIUM_VERSION>  e.g. 145.0.7632.116}"
+SHALLOW_CLONE="0"
+[ "$2" = "--shallow" ] && SHALLOW_CLONE="1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 IMAGE_NAME="chromium-mv2-builder-v6"
@@ -90,6 +92,7 @@ $DOCKER run --rm -i \
     -v "${SCRIPT_DIR}/42b5b0689e.zip:/toolchain.zip:ro" \
     -v "${SCRIPT_DIR}:/host_out" \
     -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
+    -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
     -e "PATH=/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     -e "DEPOT_TOOLS_UPDATE=0" \
     -e "DEPOT_TOOLS_METRICS=0" \
@@ -194,7 +197,12 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
         for d in _gclient_src_* _bad_scm; do
             [ -d "$d" ] && echo "   🗑️  Cleaning leftover: $d" && rm -rf "$d"
         done
-        if gclient sync --nohooks --with_branch_heads --with_tags; then
+        if [ "$SHALLOW_CLONE" = "1" ]; then
+            SYNC_ARGS="--nohooks --no-history --revision src@refs/tags/$CHROMIUM_VERSION"
+        else
+            SYNC_ARGS="--nohooks --with_branch_heads --with_tags"
+        fi
+        if gclient sync $SYNC_ARGS; then
             echo "✅ Source fetch complete."
             break
         fi
@@ -302,11 +310,19 @@ fi
 # gclient sync fetches third-party deps for this exact version.
 # --force is intentionally OMITTED: it does 'git reset --hard' on all sub-repos,
 # touching thousands of source file timestamps and causing a full recompile.
-gclient sync \
-    --nohooks \
-    --with_branch_heads \
-    --with_tags \
-    --delete_unversioned_trees
+if [ "$SHALLOW_CLONE" = "1" ]; then
+    gclient sync \
+        --nohooks \
+        --no-history \
+        --revision "src@refs/tags/$CHROMIUM_VERSION" \
+        --delete_unversioned_trees
+else
+    gclient sync \
+        --nohooks \
+        --with_branch_heads \
+        --with_tags \
+        --delete_unversioned_trees
+fi
 
 echo "✅ Source synced to $CHROMIUM_VERSION"
 
