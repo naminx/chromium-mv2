@@ -142,24 +142,71 @@ ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
 # False, which prevents any download attempt.
 
 # ── First-time source fetch ───────────────────────────────────────────────────
+# Clean up orphaned gclient temp directories BEFORE attempting any fetch/sync.
+# When 'fetch' or 'gclient sync' is interrupted mid-clone (e.g. disk full,
+# Ctrl+C, OOM-kill), it leaves behind:
+#   _gclient_src_XXXXXXXX/  — partial git clone, can be gigabytes
+#   _bad_scm/               — gclient's own failed-recovery debris
+# These silently fill the disk so every subsequent retry hits the same
+# "No space left on device" error and the volume never recovers.
+echo "🧹 Cleaning up any orphaned gclient temp directories..."
+FOUND_TEMP=0
+for d in _gclient_src_* _bad_scm; do
+    if [ -d "$d" ]; then
+        echo "   🗑️  Removing leftover: $d"
+        rm -rf "$d"
+        FOUND_TEMP=1
+    fi
+done
+[ "$FOUND_TEMP" -eq 0 ] && echo "   ✅ None found."
+
+# ── First-time source fetch ───────────────────────────────────────────────────
+# We write .gclient manually (same content as 'fetch --nohooks chromium' would
+# produce) and then call gclient sync directly. This lets us wrap the 30 GB
+# clone in a retry loop — 'fetch' has no built-in retry for fatal clone errors
+# like "invalid index-pack output" (transient network failures during large
+# pack transfers).
 if [ ! -f ".gclient" ]; then
     echo ""
-    echo "📥 First run: fetching Chromium source tree (~30 GB). Grab a coffee..."
-    fetch --nohooks chromium
+    echo "📝 Writing .gclient config (equivalent to 'fetch --nohooks chromium')..."
+    cat > .gclient << 'GCLIENTEOF'
+solutions = [
+  {
+    "name": "src",
+    "url": "https://chromium.googlesource.com/chromium/src.git",
+    "managed": False,
+    "custom_deps": {},
+    "custom_vars": {},
+  },
+]
+GCLIENTEOF
 fi
 
-# If src/ exists but is a broken partial clone (can't be used as a git repo),
-# remove it so gclient can safely rename its fresh temp clone into place.
-if [ -d "src" ] && ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
-    echo "🗑️  Removing broken partial src/ checkout..."
-    rm -rf src
-fi
-
-# If fetch was interrupted so early that 'src/' wasn't even created yet,
-# a baseline gclient sync will clone it.
-if [ ! -d "src" ]; then
-    echo "🔄 Recovering partial checkout: running gclient sync..."
-    gclient sync --nohooks
+# Clone/sync with retry.  The Chromium source is ~30 GB and a single dropped
+# TCP packet causes git to abort with "invalid index-pack output".  We clean
+# up gclient's temp dirs before each attempt so it always starts fresh.
+if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
+    [ -d "src" ] && echo "🗑️  Removing broken partial src/ checkout..." && rm -rf src
+    for attempt in 1 2 3; do
+        echo ""
+        echo "📥 Fetching Chromium source tree (~30 GB) — attempt ${attempt}/3..."
+        # Clean temp dirs from any previous failed attempt before retrying.
+        for d in _gclient_src_* _bad_scm; do
+            [ -d "$d" ] && echo "   🗑️  Cleaning leftover: $d" && rm -rf "$d"
+        done
+        if gclient sync --nohooks --with_branch_heads --with_tags; then
+            echo "✅ Source fetch complete."
+            break
+        fi
+        if [ "$attempt" -lt 3 ]; then
+            echo "⚠️  Fetch failed (attempt ${attempt}/3) — likely a transient network error."
+            echo "   Waiting 60s before retry..."
+            sleep 60
+        else
+            echo "❌ Source fetch failed after 3 attempts. Check network connectivity."
+            exit 1
+        fi
+    done
 fi
 
 cd src
@@ -215,6 +262,11 @@ export DEPOT_TOOLS_WIN_TOOLCHAIN=0
 #  for incremental builds; our patches only modify tracked files anyway.)
 git reset --hard HEAD 2>/dev/null || true
 
+# VERSION_FILE must be defined HERE — before PREV_VERSION is read — so the
+# incremental "touch changed files" step below actually fires.
+# (Previously this was defined ~120 lines later, making PREV_VERSION always
+# empty and causing ninja to silently use stale artifacts after version bumps.)
+VERSION_FILE="out/win/.last_built_version"
 PREV_VERSION=""
 [ -f "$VERSION_FILE" ] && PREV_VERSION=$(cat "$VERSION_FILE")
 
@@ -331,12 +383,13 @@ GN_ARGS='
 echo "⚙️  Configuring build (gn gen)..."
 gn gen out/win --args="$GN_ARGS"
 
-# Track the last successfully requested version. If the version changes,
-# delete mini_installer.exe to force a relink — otherwise an OOM-killed
-# mid-build leaves the previous version's .exe which ninja won't touch.
-VERSION_FILE="out/win/.last_built_version"
-if [ -f "$VERSION_FILE" ] && [ "$(cat $VERSION_FILE)" != "$CHROMIUM_VERSION" ]; then
-    echo "Version changed — forcing relink."
+# If the version changed, delete mini_installer.exe to force a relink.
+# (An OOM-killed mid-build leaves the previous version's .exe which ninja
+# otherwise considers up-to-date and never retouches.)
+# PREV_VERSION was read near the top of this script now that VERSION_FILE
+# is defined early — no need to re-read it here.
+if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
+    echo "Version changed ($PREV_VERSION → $CHROMIUM_VERSION) — forcing relink."
     rm -f out/win/mini_installer.exe out/win/mini_installer.exe.pdb
 fi
 echo "$CHROMIUM_VERSION" > "$VERSION_FILE"
