@@ -61,17 +61,6 @@ echo "🚀 Connecting to Hetzner Cloud server ($HETZNER_IP)..."
 ssh $SSH_OPTS root@$HETZNER_IP << EOF
     set -e
 
-    echo "⚙️ Setting up 16GB Swap Space..."
-    if [ ! -f /swapfile ]; then
-        fallocate -l 16G /swapfile
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo "✅ Swap space created and enabled."
-    else
-        echo "✅ Swap file already exists."
-    fi
-
     echo "📦 Checking for Nix installation..."
     if ! command -v nix &> /dev/null; then
         echo "Nix not found. Installing now..."
@@ -95,7 +84,10 @@ echo "======================================"
 echo "Starting Chromium Build at \$(date)"
 echo "======================================"
 
-if nix build --refresh github:naminx/chromium-mv2#default -L --print-out-paths | cachix push namin; then
+if nix build --refresh github:naminx/chromium-mv2#default -L \
+    --option substituters "https://cache.nixos.org https://namin.cachix.org" \
+    --option trusted-substituters "https://cache.nixos.org https://namin.cachix.org" \
+    --print-out-paths | cachix push namin; then
     echo "🎉 SUCCESS: The Chromium binary was seamlessly pushed to Cachix!"
     if [ -n "$HETZNER_API" ]; then
         echo "💥 Self-destructing server..."

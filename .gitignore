@@ -4,6 +4,7 @@ result-*
 
 # direnv cache
 .direnv/
+.openclaude-profile.json
 42b5b0689e.zip
 mini_installer-*.exe
 packager_output.log
