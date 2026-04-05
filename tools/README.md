@@ -62,12 +62,53 @@ this script (or set manually before calling).
 
 ---
 
-## Relationship to upstream scripts
+## Upstream Reference Files (project root)
 
-`linux_package_toolchain.py` and `package_from_installed.py` in the repo root are
-**reference copies** of upstream depot_tools scripts. They are not run directly;
-instead `host_packager.py` and `run_packager.py` load and patch them at runtime
-to work on a Linux filesystem.
+These files live in the project root and are **not run directly** from this repo.
+They are upstream copies kept for reference, diffing, and as the source that
+`host_packager.py` / `run_packager.py` load and patch at runtime.
 
-`vs_toolchain.py` is a reference copy of the upstream Chromium `vs_toolchain.py`
-build script, kept for inspection/diffing purposes.
+### ../linux_package_toolchain.py
+
+**Origin:** Copy of `depot_tools/win_toolchain/package_from_installed.py` as it
+existed when this project was set up (same content as `package_from_installed.py`
+below — kept as a named alias for clarity).
+
+**What it does:** Given an installed copy of Visual Studio 2022 BuildTools and the
+Windows 10 SDK, walks both trees and zips the required subset of files into
+`out.zip`, then renames it to `<sha1>.zip` using the same hash algorithm that
+`get_toolchain_if_necessary.py` uses to verify downloads. This is the canonical
+upstream packaging script that our patching wrappers (`host_packager.py`,
+`run_packager.py`) load and adapt for Linux.
+
+**Key internals:**
+- `GetVSPath()` — calls `vswhere.exe` (mocked on Linux by our wrappers).
+- `BuildFileList()` — enumerates VS CRT, DIA SDK, ATL/MFC, and SDK headers/libs.
+- `GenerateSetEnvCmd()` — synthesises the `SetEnv.cmd` / `SetEnv.*.json` batch files.
+- `RenameToSha1()` — extracts the zip to a temp dir, hashes it with SHA-1, renames.
+- CLI: `python linux_package_toolchain.py 2022 -w 10.0.26100.0 [--noarm]`
+  (Windows only; use `tools/host_packager.py` or `tools/run_packager.py` on Linux).
+
+### ../package_from_installed.py
+
+**Origin:** Same upstream source as `linux_package_toolchain.py`; identical content.
+Present as the canonical depot_tools filename so patches and diffs against the
+upstream repo remain readable.
+
+### ../vs_toolchain.py
+
+**Origin:** Copy of `build/vs_toolchain.py` from the Chromium source tree
+(hash `e4305f407e`, SDK `10.0.26100.0`).
+
+**What it does:** Manages the depot_tools-downloaded VS toolchain for Chromium GN
+builds. Used by `gclient runhooks` and the GN build system on both Windows and
+cross-compiling Linux hosts.
+
+**Key entry points (called by the build system, not manually):**
+- `update` — downloads or verifies the toolchain zip via `get_toolchain_if_necessary.py`.
+- `get_toolchain_dir` — prints GN variables (`vs_path`, `sdk_path`, `vs_version`, …)
+  read by `build/toolchain/win/setup_toolchain.py`.
+- `copy_dlls` — copies VS CRT and debugger DLLs into the build output directory.
+
+**Kept here for:** inspecting which toolchain hash / SDK version Chromium expects,
+diffing against our patched copy, and understanding what the build system calls.

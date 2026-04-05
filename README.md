@@ -14,13 +14,28 @@ Custom patches live in the `patches/` directory:
 
 ```
 .
+├── default.nix                     # Top-level Nix expression — builds Chromium
+├── flake.nix / flake.lock          # Nix flake for dev shell
 ├── fetch-nixpkgs                   # Fetches nixpkgs sparse checkout into ./nixpkgs/
-├── patch-nixpkgs                   # Patches nixpkgs/pkgs/.../chromium/common.nix with our custom patches
-├── default.nix                     # Top-level Nix expression — builds chromium
-├── patches/                        # Custom patch files applied on top of stock Chromium
-├── tools/                          # One-time-use scripts for toolchain packaging (see tools/README.md)
-│   ├── host_packager.py            #   Package VS toolchain from locally-mounted Windows drive (NixOS host)
-│   └── run_packager.py             #   Package VS toolchain inside the Hetzner Docker build container
+├── patch-nixpkgs                   # Injects custom patches into nixpkgs (idempotent)
+├── patches/                        # Custom .patch files applied on top of stock Chromium
+│
+├── BUILD.md                        # Docs for all build/maintenance shell scripts
+├── build-on-hetzner.sh             # Build Chromium on a remote Hetzner server (Linux)
+├── build-docker.sh                 # Cross-compile Chromium for Windows via Docker
+├── build-win-on-hetzner.sh         # Windows build on Hetzner with Drive caching
+├── tail-hetzner.sh                 # Stream & monitor remote build logs
+├── do_package.sh                   # Package VS toolchain zip (runs inside Docker container)
+│
+├── linux_package_toolchain.py      # Upstream depot_tools packaging script (reference copy)
+├── package_from_installed.py       # Same as above — canonical depot_tools filename
+├── vs_toolchain.py                 # Upstream Chromium build/vs_toolchain.py (reference copy)
+│
+├── tools/                          # Linux-side wrappers to run the above on NixOS/Docker
+│   ├── host_packager.py            #   Package toolchain from locally-mounted Windows drive
+│   ├── run_packager.py             #   Package toolchain inside the Docker build container
+│   └── README.md                   #   Full docs for tools/ and upstream reference .py files
+│
 └── .github/
     └── workflows/
         └── build.yml               # GitHub Actions: build + push to Cachix
