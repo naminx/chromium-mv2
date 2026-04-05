@@ -14,13 +14,16 @@ Custom patches live in the `patches/` directory:
 
 ```
 .
-├── fetch-nixpkgs       # Fetches nixpkgs sparse checkout into ./nixpkgs/
-├── patch-nixpkgs       # Patches nixpkgs/pkgs/.../chromium/common.nix with our custom patches
-├── default.nix         # Top-level Nix expression — builds chromium
-├── patches/            # Custom patch files applied on top of stock Chromium
+├── fetch-nixpkgs                   # Fetches nixpkgs sparse checkout into ./nixpkgs/
+├── patch-nixpkgs                   # Patches nixpkgs/pkgs/.../chromium/common.nix with our custom patches
+├── default.nix                     # Top-level Nix expression — builds chromium
+├── patches/                        # Custom patch files applied on top of stock Chromium
+├── tools/                          # One-time-use scripts for toolchain packaging (see tools/README.md)
+│   ├── host_packager.py            #   Package VS toolchain from locally-mounted Windows drive (NixOS host)
+│   └── run_packager.py             #   Package VS toolchain inside the Hetzner Docker build container
 └── .github/
     └── workflows/
-        └── build.yml   # GitHub Actions: build + push to Cachix
+        └── build.yml               # GitHub Actions: build + push to Cachix
 ```
 
 ## Local Build
