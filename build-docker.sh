@@ -2,8 +2,13 @@
 # build-docker.sh — Cross-compile Chromium for Windows using Docker/Podman.
 #
 # Usage:
-#   ./build-docker.sh <CHROMIUM_VERSION>
+#   ./build-docker.sh <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow]
 #   ./build-docker.sh 145.0.7632.116
+#
+# Options:
+#   --from-cache <PREV>  Explicitly set the previous Chromium version. Needed for
+#                        correct incremental time stamps when restoring external cache.
+#   --shallow            Use shallow git clone to save time and disk space.
 #
 # Produces: mini_installer.exe (Windows x64 installer)
 #
@@ -15,12 +20,46 @@
 
 set -e
 
-CHROMIUM_VERSION="${1:?Usage: $0 <CHROMIUM_VERSION>  e.g. 145.0.7632.116}"
+usage() {
+    echo "Usage: $0 <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow]"
+    echo ""
+    echo "Options:"
+    echo "  --from-cache <PREV>  Explicitly set the previous Chromium version. Needed for"
+    echo "                       correct incremental time stamps when restoring external cache."
+    echo "  --shallow            Use shallow git clone to save time and disk space."
+    echo ""
+    echo "Example:"
+    echo "  $0 145.0.7632.116"
+    exit 1
+}
+
+if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [[ "$1" == -* ]]; then
+    usage
+fi
+
+CHROMIUM_VERSION="$1"
 SHALLOW_CLONE="0"
-[ "$2" = "--shallow" ] && SHALLOW_CLONE="1"
+FROM_CACHE_VERSION=""
+
+shift || true
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --shallow)
+            SHALLOW_CLONE="1"
+            shift
+            ;;
+        --from-cache)
+            FROM_CACHE_VERSION="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
-IMAGE_NAME="chromium-mv2-builder-v6"
+IMAGE_NAME="chromium-mv2-builder-v7"
 VOLUME_NAME="chromium-mv2-src"
 
 # Prefer docker (already installed); fall back to podman.
@@ -83,6 +122,7 @@ echo ""
 
 $DOCKER run --rm -i \
     --name "chromium-mv2-build-$(date +%s)" \
+    --network host \
     --device /dev/fuse \
     --cap-add SYS_ADMIN \
     --security-opt apparmor:unconfined \
@@ -91,10 +131,12 @@ $DOCKER run --rm -i \
     -v "${PATCHES_DIR}:/patches:ro" \
     -v "${SCRIPT_DIR}/42b5b0689e.zip:/toolchain.zip:ro" \
     -v "${SCRIPT_DIR}:/host_out" \
+    -v "${SCRIPT_DIR}/tools/do_package.sh:/host_out/do_package.sh:ro" \
     -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
     -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
+    -e "FROM_CACHE_VERSION=${FROM_CACHE_VERSION}" \
     -e "PATH=/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    -e "DEPOT_TOOLS_UPDATE=0" \
+    -e "DEPOT_TOOLS_UPDATE=1" \
     -e "DEPOT_TOOLS_METRICS=0" \
     -e "GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1" \
     "$IMAGE_NAME" bash << 'INNER'
@@ -152,16 +194,21 @@ ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
 #   _bad_scm/               — gclient's own failed-recovery debris
 # These silently fill the disk so every subsequent retry hits the same
 # "No space left on device" error and the volume never recovers.
-echo "🧹 Cleaning up any orphaned gclient temp directories..."
-FOUND_TEMP=0
-for d in _gclient_src_* _bad_scm; do
-    if [ -d "$d" ]; then
-        echo "   🗑️  Removing leftover: $d"
-        rm -rf "$d"
-        FOUND_TEMP=1
+echo "🧹 Finding and quietly trashing any corrupted component repos..."
+find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
+    echo "   🗑️  Sweeping corrupted component to background trash: $d"
+    PARENT_DIR="$(dirname "$d")"
+    # Never delete the root directory (.) if d is directly in root
+    if [ "$PARENT_DIR" != "." ]; then
+        TRASH_PARENT="$(dirname "$PARENT_DIR")/.trash_$(date +%s)_$(basename "$PARENT_DIR")"
+        mv "$PARENT_DIR" "$TRASH_PARENT" 2>/dev/null || true
+        nohup rm -rf "$TRASH_PARENT" >/dev/null 2>&1 &
+    else
+        TRASH_DIR=".trash_$(date +%s)_$(basename "$d")"
+        mv "$d" "$TRASH_DIR" 2>/dev/null || true
+        nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
     fi
 done
-[ "$FOUND_TEMP" -eq 0 ] && echo "   ✅ None found."
 
 # ── First-time source fetch ───────────────────────────────────────────────────
 # We write .gclient manually (same content as 'fetch --nohooks chromium' would
@@ -189,13 +236,32 @@ fi
 # TCP packet causes git to abort with "invalid index-pack output".  We clean
 # up gclient's temp dirs before each attempt so it always starts fresh.
 if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
-    [ -d "src" ] && echo "🗑️  Removing broken partial src/ checkout..." && rm -rf src
+    if [ -d "src" ]; then
+        if [ -d "src/out" ]; then
+            echo "📦 Saving out/ directory from broken src (preventing cache loss)..."
+            mv src/out /tmp/saved_out
+        fi
+        echo "🗑️  Moving broken partial src/ checkout to trash..."
+        TRASH_DIR=".trash_src_$(date +%s)"
+        mv src "$TRASH_DIR"
+        nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
+    fi
     for attempt in 1 2 3; do
         echo ""
         echo "📥 Fetching Chromium source tree (~30 GB) — attempt ${attempt}/3..."
         # Clean temp dirs from any previous failed attempt before retrying.
-        for d in _gclient_src_* _bad_scm; do
-            [ -d "$d" ] && echo "   🗑️  Cleaning leftover: $d" && rm -rf "$d"
+        find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
+            echo "   🗑️  Sweeping corrupted component to background trash: $d"
+            PARENT_DIR="$(dirname "$d")"
+            if [ "$PARENT_DIR" != "." ]; then
+                TRASH_PARENT="$(dirname "$PARENT_DIR")/.trash_$(date +%s)_$(basename "$PARENT_DIR")"
+                mv "$PARENT_DIR" "$TRASH_PARENT" 2>/dev/null || true
+                nohup rm -rf "$TRASH_PARENT" >/dev/null 2>&1 &
+            else
+                TRASH_DIR=".trash_$(date +%s)_$(basename "$d")"
+                mv "$d" "$TRASH_DIR" 2>/dev/null || true
+                nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
+            fi
         done
         if [ "$SHALLOW_CLONE" = "1" ]; then
             SYNC_ARGS="--nohooks --no-history --revision src@refs/tags/$CHROMIUM_VERSION"
@@ -215,6 +281,13 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
             exit 1
         fi
     done
+
+    # Restore the cached out/ directory if we saved it earlier
+    if [ -d "/tmp/saved_out" ]; then
+        echo "📦 Restoring saved out/ directory into fresh src checkout..."
+        mkdir -p src
+        mv /tmp/saved_out src/out
+    fi
 fi
 
 cd src
@@ -231,7 +304,7 @@ write_toolchain_json() {
     NEW=$(cat <<'TCEOF'
 {
   "path": "TOOLCHAIN_DEST_PLACEHOLDER",
-  "version": "2022",
+  "version": "42b5b0689e",
   "win_sdk": "TOOLCHAIN_DEST_PLACEHOLDER/Windows Kits/10",
   "wdk": "TOOLCHAIN_DEST_PLACEHOLDER/wdk",
   "runtime_dirs": [
@@ -264,11 +337,12 @@ export DEPOT_TOOLS_WIN_TOOLCHAIN=0
 # but we try anyway; it will succeed once src/ exists.
 [ -d build ] && write_toolchain_json || true
 
-# Revert any previously applied patches so git checkout can proceed cleanly.
-# Patches are re-applied from /patches on every run, so this is always safe.
-# (git clean -fd is intentionally omitted: out/ is gitignored and must be kept
-#  for incremental builds; our patches only modify tracked files anyway.)
+# Revert any previously applied patches and remove any untracked files that
+# would block git checkout (e.g. files created by gclient sync that are also
+# present in the target version tag). out/ is gitignored so build artifacts
+# are never affected by git clean -fd (only git clean -fdx would wipe them).
 git reset --hard HEAD 2>/dev/null || true
+git clean -fd 2>/dev/null || true
 
 # VERSION_FILE must be defined HERE — before PREV_VERSION is read — so the
 # incremental "touch changed files" step below actually fires.
@@ -277,6 +351,11 @@ git reset --hard HEAD 2>/dev/null || true
 VERSION_FILE="out/win/.last_built_version"
 PREV_VERSION=""
 [ -f "$VERSION_FILE" ] && PREV_VERSION=$(cat "$VERSION_FILE")
+
+if [ -n "$FROM_CACHE_VERSION" ]; then
+    PREV_VERSION="$FROM_CACHE_VERSION"
+    echo "ℹ️  Using previous version from --from-cache: $PREV_VERSION"
+fi
 
 if ! git rev-parse "$CHROMIUM_VERSION" >/dev/null 2>&1 || [ "$(git rev-parse HEAD)" != "$(git rev-parse "${CHROMIUM_VERSION}^{commit}" 2>/dev/null)" ]; then
     echo "🔄 Syncing to version $CHROMIUM_VERSION..."
@@ -295,7 +374,7 @@ if ! git rev-parse "$CHROMIUM_VERSION" >/dev/null 2>&1 || [ "$(git rev-parse HEA
     git restore-mtime --force
     if [ -n "$PREV_VERSION" ] && git rev-parse "$PREV_VERSION" >/dev/null 2>&1; then
         echo "🔁 Touching files changed between $PREV_VERSION and $CHROMIUM_VERSION..."
-        git diff --name-only "$PREV_VERSION" "$CHROMIUM_VERSION" | xargs -d '\n' touch --
+        git diff --name-only --diff-filter=d "$PREV_VERSION" "$CHROMIUM_VERSION" | xargs -r -d '\n' sh -c 'for f; do [ -e "$f" ] && touch -c -- "$f"; done' sh || true
     fi
 else
     echo "✅ Already at version $CHROMIUM_VERSION. Skipping fetch/checkout."
@@ -325,6 +404,12 @@ else
 fi
 
 echo "✅ Source synced to $CHROMIUM_VERSION"
+
+# Force Chromium to accept our customized mounted Windows toolchain by rewriting its expectations
+if [ -f build/vs_toolchain.py ]; then
+    sed -i "s/TOOLCHAIN_HASH = .*/TOOLCHAIN_HASH = '42b5b0689e'/g" build/vs_toolchain.py
+    sed -i "s/subprocess.check_call(get_toolchain_args)/pass/g" build/vs_toolchain.py
+fi
 
 # Re-write toolchain JSON after sync (sync may recreate build/ directory)
 write_toolchain_json
