@@ -4,6 +4,6 @@ result-*
 
 # direnv cache
 .direnv/
-.openclaude-profile.json
+.openclaude-profile.*
 mini_installer-*.exe
 packager_output.log

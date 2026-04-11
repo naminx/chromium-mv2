@@ -65,7 +65,7 @@ while [ $# -gt 0 ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
-IMAGE_NAME="chromium-mv2-builder-v9"
+IMAGE_NAME="chromium-mv2-builder-v10"
 VOLUME_NAME="chromium-mv2-src"
 
 # Prefer docker (already installed); fall back to podman.
@@ -93,7 +93,7 @@ LABEL description="Chromium incremental build environment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
-    fuse ciopfs unzip p7zip-full patch gperf git-restore-mtime \
+    fuse ciopfs unzip p7zip-full pkg-config patch gperf git-restore-mtime \
     && rm -rf /var/lib/apt/lists/*
 
 # depot_tools (contains gclient, fetch, gn)
@@ -564,7 +564,6 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
         enable_nacl = false
         proprietary_codecs = true
         ffmpeg_branding = \"Chrome\"
-        concurrent_links = $CONCURRENT_LINKS
     "
     gn gen out/linux --args="$GN_ARGS_LINUX"
 
@@ -601,7 +600,6 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
         enable_nacl = false
         proprietary_codecs = true
         ffmpeg_branding = \"Chrome\"
-        concurrent_links = $CONCURRENT_LINKS
     "
     # Always run gn gen — it is idempotent and takes ~5s. The previous conditional
     # used a fragile whitespace comparison that always triggered a re-run anyway,
