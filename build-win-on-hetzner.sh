@@ -65,23 +65,6 @@ fi
 echo "Make sure your patches/ are saved locally! Press Enter to proceed (Ctrl+C to abort)."
 read -rp "..."
 
-# ── Ensure toolchain zip is on Google Drive (upload once, reuse forever) ──────
-TOOLCHAIN_ZIP="$SCRIPT_DIR/42b5b0689e.zip"
-TOOLCHAIN_GDRIVE_PATH="$GDRIVE_PATH/toolchain/42b5b0689e.zip"
-if [ ! -f "$TOOLCHAIN_ZIP" ]; then
-    echo "❌ Toolchain zip not found at $TOOLCHAIN_ZIP"
-    exit 1
-fi
-echo ""
-echo "🔍 Checking Google Drive for toolchain zip..."
-if rclone lsf "$GDRIVE_REMOTE:$TOOLCHAIN_GDRIVE_PATH" > /dev/null 2>&1; then
-    echo "✅ Toolchain zip already on Google Drive — skipping upload."
-else
-    echo "📤 Uploading toolchain zip to Google Drive (one-time, ~1.3 GB)..."
-    rclone copy "$TOOLCHAIN_ZIP" "$GDRIVE_REMOTE:$GDRIVE_PATH/toolchain/" --progress
-    echo "✅ Toolchain zip uploaded."
-fi
-
 # ── Generate the autonomous build script locally ──────────────────────────────
 # We write it to a local temp file (two heredocs: first injects variables via
 # local expansion, second appends the script body with no local expansion).
@@ -97,6 +80,7 @@ GDRIVE_REMOTE="$GDRIVE_REMOTE"
 GDRIVE_PATH="$GDRIVE_PATH"
 HETZNER_API="$HETZNER_API"
 TOOLCHAIN_HASH="42b5b0689e"
+TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
 EOF
 
 # Part 2: script body — single-quoted so NO local expansion; all $VAR are remote
@@ -109,16 +93,6 @@ echo "Windows Chromium Build at $(date)"
 echo "======================================"
 
 cd /root/chromium-mv2
-
-# ── Step 0: Download toolchain zip from Google Drive ─────────────────────────
-if [ ! -f "${TOOLCHAIN_HASH}.zip" ]; then
-    echo ""
-    echo "📥 Downloading toolchain zip from Google Drive (~1.3 GB, ~10s on Hetzner)..."
-    rclone copy "${GDRIVE_REMOTE}:${GDRIVE_PATH}/toolchain/${TOOLCHAIN_HASH}.zip" . --progress
-    echo "✅ Toolchain zip ready."
-else
-    echo "✅ Toolchain zip already present locally."
-fi
 
 # ── Step 1: Restore cached artifacts (if requested) ──────────────────────────
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
@@ -143,9 +117,9 @@ fi
 
 # ── Step 2: Build ─────────────────────────────────────────────────────────────
 echo ""
-BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION"
+BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION"
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
-    BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
+    BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
 fi
 echo "🏗️  Starting $BUILD_CMD ..."
 if $BUILD_CMD; then
@@ -198,12 +172,11 @@ echo ""
 echo "🚀 Preparing Hetzner ($HETZNER_IP)..."
 ssh $SSH_OPTS root@$HETZNER_IP "mkdir -p /root/chromium-mv2"
 
-echo "📤 Synchronizing build scripts and patches (excluding toolchain zip)..."
+echo "📤 Synchronizing build scripts and patches..."
 rsync -a -e "ssh $SSH_OPTS" --info=progress2 \
     --exclude='.git*' \
     --exclude='out' \
     --exclude='*.exe' \
-    --exclude='42b5b0689e.zip' \
     "$SCRIPT_DIR/" root@$HETZNER_IP:/root/chromium-mv2/
 
 echo "📤 Uploading autonomous build script..."

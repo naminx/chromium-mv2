@@ -2,7 +2,7 @@
 set -e
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: ./build-on-hetzner.sh <HETZNER_IP> <CACHIX_TOKEN> [HETZNER_API_TOKEN]"
+    echo "Usage: ./build-nix-on-hetzner.sh <HETZNER_IP> <CACHIX_TOKEN> [HETZNER_API_TOKEN]"
     echo "  (If API token is provided, server will SELF-DESTRUCT when finished!)"
     exit 1
 fi

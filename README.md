@@ -6,8 +6,8 @@ A customized NixOS build of Chromium with extra patches, automatically built and
 
 Custom patches live in the `patches/` directory:
 
-| Patch | Description |
-|-------|-------------|
+| Patch                    | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
 | `keep-window-open.patch` | Creates a new tab instead of closing the window when the last tab is closed |
 
 ## Project Layout
@@ -21,11 +21,11 @@ Custom patches live in the `patches/` directory:
 ├── patches/                        # Custom .patch files applied on top of stock Chromium
 │
 ├── BUILD.md                        # Docs for all build/maintenance shell scripts
-├── build-on-hetzner.sh             # Build Chromium on a remote Hetzner server (Linux)
-├── build-docker.sh                 # Cross-compile Chromium for Windows via Docker
+├── build-nix-on-hetzner.sh         # Build Chromium on a remote Hetzner server (Nix)
+├── build-binaries-on-hetzner.sh    # Build Debian + Windows binaries on Hetzner (Snapshot)
+├── build-docker.sh                 # Cross-compile Chromium for Linux (.deb) + Windows (.exe) via Docker
 ├── build-win-on-hetzner.sh         # Windows build on Hetzner with Drive caching
 ├── tail-hetzner.sh                 # Stream & monitor remote build logs
-├── do_package.sh                   # Package VS toolchain zip (runs inside Docker container)
 │
 ├── linux_package_toolchain.py      # Upstream depot_tools packaging script (reference copy)
 ├── package_from_installed.py       # Same as above — canonical depot_tools filename
@@ -34,6 +34,7 @@ Custom patches live in the `patches/` directory:
 ├── tools/                          # Linux-side wrappers to run the above on NixOS/Docker
 │   ├── host_packager.py            #   Package toolchain from locally-mounted Windows drive
 │   ├── run_packager.py             #   Package toolchain inside the Docker build container
+│   ├── do_package.sh               #   Package VS toolchain zip (runs inside Docker container)
 │   └── README.md                   #   Full docs for tools/ and upstream reference .py files
 │
 └── .github/
@@ -71,15 +72,15 @@ The workflow (`.github/workflows/build.yml`) needs the following configured in y
 
 ### Repository Variables (`Settings → Secrets and variables → Actions → Variables`)
 
-| Name | Value |
-|------|-------|
+| Name           | Value                                       |
+| -------------- | ------------------------------------------- |
 | `CACHIX_CACHE` | Your Cachix cache name (e.g. `my-chromium`) |
 
 ### Repository Secrets (`Settings → Secrets and variables → Actions → Secrets`)
 
-| Name | Value |
-|------|-------|
-| `CACHIX_AUTH_TOKEN` | Your Cachix auth token (from `cachix authtoken generate`) |
+| Name                | Value                                                           |
+| ------------------- | --------------------------------------------------------------- |
+| `CACHIX_AUTH_TOKEN` | Your Cachix auth token (from `cachix authtoken generate`)       |
 | `CACHIX_PUBLIC_KEY` | Your cache's public key (from `cachix use <cache-name>` output) |
 
 ### Quick Cachix Setup
@@ -152,6 +153,7 @@ The standard NixOS `chromium` package does not support appending to `patches` vi
 references local files via relative `./patches/` paths, which are not easily overridable).
 
 Our solution:
-1. Sparse-checkout *only* the chromium package directory from nixpkgs
+
+1. Sparse-checkout _only_ the chromium package directory from nixpkgs
 2. Programmatically patch `common.nix` to append our custom patches
 3. Build using this locally modified nixpkgs

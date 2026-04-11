@@ -7,7 +7,7 @@ GDRIVE_PATH="chromium-mv2-cache"
 RCLONE_CONF="${HOME}/.config/rclone/rclone.conf"
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: ./build-win-on-hetzner-with-snapshots.sh <HETZNER_IP> <CHROMIUM_VERSION> [OPTIONS]"
+    echo "Usage: ./build-binaries-on-hetzner.sh <HETZNER_IP> <CHROMIUM_VERSION> [OPTIONS]"
     echo ""
     echo "  --from-cache <PREV>   Restore cached out/win/ from Google Drive before building."
     echo "                        Only needed on the very first run (no snapshot exists yet)."
@@ -24,7 +24,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
     echo "  Next runs  : create a new server from the last snapshot, run with --api <TOKEN>"
     echo "               (no --from-cache needed — source tree is already on the snapshot disk)"
     echo ""
-    echo "Google Drive remote (default: 'gdrive'): GDRIVE_REMOTE=myname ./build-win-on-hetzner-with-snapshots.sh ..."
+    echo "Google Drive remote (default: 'gdrive'): GDRIVE_REMOTE=myname ./build-binaries-on-hetzner.sh ..."
     echo "Artifacts stored in Google Drive folder : $GDRIVE_PATH/"
     echo ""
     echo "Prerequisites: run 'rclone config' locally and name the remote '$GDRIVE_REMOTE'."
@@ -61,13 +61,14 @@ if [ ! -f "$RCLONE_CONF" ]; then
 fi
 
 echo "====================================================================="
-echo "Windows Chromium Build on Hetzner  [snapshot mode]"
+echo "Chromium Build on Hetzner (Linux + Windows) [snapshot mode]"
 echo "  Version : $CHROMIUM_VERSION"
 if [ "$USE_CACHE" = "1" ]; then
-    echo "  Cache   : $GDRIVE_REMOTE:$GDRIVE_PATH/out-win-${PREV_VERSION}.tar.gz  (download before build)"
+    echo "  Cache   : $GDRIVE_REMOTE:$GDRIVE_PATH/out-win-${PREV_VERSION}.tar.gz"
 fi
-echo "  Exe     : $GDRIVE_REMOTE:$GDRIVE_PATH/releases/mini_installer-${CHROMIUM_VERSION}.exe  (upload on success)"
-echo "  out/win/: preserved in Hetzner snapshot — no GDrive tarball needed"
+echo "  Debian  : chromium-browser-*.deb (pull locally on success)"
+echo "  Windows : $GDRIVE_REMOTE:$GDRIVE_PATH/releases/mini_installer-${CHROMIUM_VERSION}.exe"
+echo "  out/    : preserved in Hetzner snapshot — no GDrive tarball needed"
 if [ -n "$HETZNER_API" ]; then
     echo "  📸 API TOKEN SET: server will SNAPSHOT then SELF-DESTRUCT on successful build."
 else
@@ -75,23 +76,6 @@ else
 fi
 echo "Make sure your patches/ are saved locally! Press Enter to proceed (Ctrl+C to abort)."
 read -rp "..."
-
-# ── Ensure toolchain zip is on Google Drive (upload once, reuse forever) ──────
-TOOLCHAIN_ZIP="$SCRIPT_DIR/42b5b0689e.zip"
-TOOLCHAIN_GDRIVE_PATH="$GDRIVE_PATH/toolchain/42b5b0689e.zip"
-if [ ! -f "$TOOLCHAIN_ZIP" ]; then
-    echo "❌ Toolchain zip not found at $TOOLCHAIN_ZIP"
-    exit 1
-fi
-echo ""
-echo "🔍 Checking Google Drive for toolchain zip..."
-if rclone lsf "$GDRIVE_REMOTE:$TOOLCHAIN_GDRIVE_PATH" > /dev/null 2>&1; then
-    echo "✅ Toolchain zip already on Google Drive — skipping upload."
-else
-    echo "📤 Uploading toolchain zip to Google Drive (one-time, ~1.3 GB)..."
-    rclone copy "$TOOLCHAIN_ZIP" "$GDRIVE_REMOTE:$GDRIVE_PATH/toolchain/" --progress
-    echo "✅ Toolchain zip uploaded."
-fi
 
 # ── Generate the autonomous build script locally ──────────────────────────────
 # We write it to a local temp file (two heredocs: first injects variables via
@@ -108,6 +92,7 @@ GDRIVE_REMOTE="$GDRIVE_REMOTE"
 GDRIVE_PATH="$GDRIVE_PATH"
 HETZNER_API="$HETZNER_API"
 TOOLCHAIN_HASH="42b5b0689e"
+TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
 EOF
 
 # Part 2: script body — single-quoted so NO local expansion; all $VAR are remote
@@ -119,18 +104,6 @@ echo "Windows Chromium Build at $(date)"
 echo "======================================"
 
 cd /root/chromium-mv2
-
-# ── Step 0: Ensure toolchain zip is present ──────────────────────────────────
-# First run : downloaded from Google Drive at Hetzner network speed (~10s).
-# Subsequent runs : already on disk from the snapshot — no download needed.
-if [ ! -f "${TOOLCHAIN_HASH}.zip" ]; then
-    echo ""
-    echo "📥 Downloading toolchain zip from Google Drive (~1.3 GB)..."
-    rclone copy "${GDRIVE_REMOTE}:${GDRIVE_PATH}/toolchain/${TOOLCHAIN_HASH}.zip" . --progress
-    echo "✅ Toolchain zip ready (will be preserved in the next snapshot)."
-else
-    echo "✅ Toolchain zip already present (from snapshot)."
-fi
 
 # ── Step 1: Restore cached artifacts (if requested) ──────────────────────────
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
@@ -155,9 +128,9 @@ fi
 
 # ── Step 2: Build ─────────────────────────────────────────────────────────────
 echo ""
-BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION"
+BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION"
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
-    BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
+    BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
 fi
 echo "🏗️  Starting $BUILD_CMD ..."
 
@@ -168,20 +141,33 @@ if $BUILD_CMD; then
     echo ""
     echo "🎉 BUILD SUCCESS at $(date)"
 
-    # ── Step 3a: Upload mini_installer.exe FIRST — must complete before server is deleted
-    # The server will self-destruct after the snapshot; without this upload the user would
-    # have to spin the server back up (full hourly charge) just to get a ~120 MB file.
+    # ── Step 3a: Upload mini_installer.exe AND .deb FIRST ────────────────────
+    # Must complete before server is deleted.
     EXE_NAME="mini_installer-${CHROMIUM_VERSION}.exe"
+    DEB_NAME=$(ls /root/chromium-mv2/chromium-browser_*-${CHROMIUM_VERSION}.deb 2>/dev/null | head -n 1)
+    
     echo ""
-    echo "☁️  Uploading ${EXE_NAME} to ${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/ ..."
+    echo "☁️  Uploading installers to ${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/ ..."
+    
     if rclone copy "/root/chromium-mv2/${EXE_NAME}" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
+        echo "✅ Windows installer uploaded."
         EXE_UPLOADED=1
-        echo "✅ Installer uploaded at $(date)."
-        echo "   Download: rclone copy ${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/${EXE_NAME} ./"
     else
-        echo "⚠️  WARNING: installer upload FAILED at $(date)."
-        echo "   The server will NOT be deleted until you retrieve the file manually."
-        echo "   Retry: rclone copy ${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/${EXE_NAME} ./"
+        echo "⚠️  WARNING: Windows installer upload FAILED."
+    fi
+
+    if [ -n "$DEB_NAME" ]; then
+        if rclone copy "$DEB_NAME" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
+            echo "✅ Debian package uploaded."
+        else
+            echo "⚠️  WARNING: Debian package upload FAILED."
+        fi
+    fi
+
+    if [ "$EXE_UPLOADED" = "1" ]; then
+        echo "✅ All installers ready at $(date)."
+    else
+        echo "⚠️  WARNING: One or more uploads failed. Server will NOT be deleted automatically."
     fi
 
     # Step 3b skipped: out/win/ is preserved in the Hetzner snapshot.
@@ -236,7 +222,7 @@ if [ -n "$HETZNER_API" ]; then
         if [ -n "$ACTION_ID" ]; then
             echo "⏳ Waiting for snapshot to finish (action ${ACTION_ID}, up to 20 min)..."
             SNAP_OK=0
-            for i in $(seq 1 120); do   # 120 × 10 s = 20 minutes max
+            for i in $(seq 1 240); do   # 240 × 10 s = 40 minutes max
                 STATUS=$(curl -sf \
                     -H "Authorization: Bearer $HETZNER_API" \
                     "https://api.hetzner.cloud/v1/actions/${ACTION_ID}" | \
@@ -246,7 +232,7 @@ if [ -n "$HETZNER_API" ]; then
                     SNAP_OK=1
                     echo "✅ Snapshot ready (image id: ${IMAGE_ID})."
                     echo "   ➡  Next build: create a Hetzner server from image ${IMAGE_ID}"
-                    echo "      then run: ./build-win-on-hetzner-with-snapshots.sh <NEW_IP> <NEW_VER> --api <TOKEN>"
+                    echo "      then run: ./build-binaries-on-hetzner.sh <NEW_IP> <NEW_VER> --api <TOKEN>"
                     break
                 elif [ "$STATUS" = "error" ]; then
                     echo "⚠️  Snapshot action reported an error — skipping deletion to preserve data."
@@ -257,7 +243,7 @@ if [ -n "$HETZNER_API" ]; then
                 sleep 10
             done
             if [ "$SNAP_OK" = "0" ] && [ "$STATUS" != "error" ]; then
-                echo "⚠️  Snapshot did not finish within 20 minutes."
+                echo "⚠️  Snapshot did not finish within 40 minutes."
                 echo "   Check Hetzner dashboard for image status before deleting the server."
             fi
         else
@@ -285,12 +271,11 @@ echo ""
 echo "🚀 Preparing Hetzner ($HETZNER_IP)..."
 ssh $SSH_OPTS root@$HETZNER_IP "mkdir -p /root/chromium-mv2"
 
-echo "📤 Synchronizing build scripts and patches (toolchain zip excluded — fetched from GDrive)..."
+echo "📤 Synchronizing build scripts and patches..."
 rsync -a -e "ssh $SSH_OPTS" --info=progress2 \
     --exclude='.git*' \
     --exclude='out' \
     --exclude='*.exe' \
-    --exclude='42b5b0689e.zip' \
     "$SCRIPT_DIR/" root@$HETZNER_IP:/root/chromium-mv2/
 
 echo "📤 Uploading autonomous build script..."
@@ -332,13 +317,12 @@ echo "✅ Build launched! You can safely close your terminal."
 echo ""
 echo "Monitor : ./tail-hetzner.sh $HETZNER_IP"
 echo ""
-echo "When done (success), download the installer:"
-echo "  rclone copy $GDRIVE_REMOTE:$GDRIVE_PATH/releases/mini_installer-$CHROMIUM_VERSION.exe ./"
+echo "When done (success), download the installers from Google Drive:"
+echo "  rclone copy $GDRIVE_REMOTE:$GDRIVE_PATH/releases/ ./"
 echo ""
 if [ -n "$HETZNER_API" ]; then
     echo "📸 API TOKEN DETECTED: server will SNAPSHOT itself then SELF-DELETE"
     echo "   on BOTH build success and failure."
-    echo "   Cost: snapshot ~\$0.0199/GB/month — far cheaper than idle server time."
 else
     echo "⚠️  NO API TOKEN: no snapshot will be taken."
     echo "   You MUST delete the server manually from the Hetzner dashboard."

@@ -87,7 +87,7 @@ LABEL description="Chromium incremental build environment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
-    fuse ciopfs unzip patch gperf git-restore-mtime \
+    fuse ciopfs unzip 7zip patch gperf git-restore-mtime \
     && rm -rf /var/lib/apt/lists/*
 
 # depot_tools (contains gclient, fetch, gn)
@@ -129,10 +129,10 @@ $DOCKER run --rm -i \
     --ulimit nofile=65536:65536 \
     -v "${VOLUME_NAME}:/chromium" \
     -v "${PATCHES_DIR}:/patches:ro" \
-    -v "${SCRIPT_DIR}/42b5b0689e.zip:/toolchain.zip:ro" \
     -v "${SCRIPT_DIR}:/host_out" \
     -v "${SCRIPT_DIR}/tools/do_package.sh:/host_out/do_package.sh:ro" \
     -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
+    -e "TOOLCHAIN_PASS=${TOOLCHAIN_PASS}" \
     -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
     -e "FROM_CACHE_VERSION=${FROM_CACHE_VERSION}" \
     -e "PATH=/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
@@ -168,13 +168,14 @@ fi
 if [ ! -f "$TOOLCHAIN_DEST/VS_VERSION" ]; then
     echo "📦 Initializing Windows toolchain in volume..."
     mkdir -p "$TOOLCHAIN_DEST"
-    if [ -f "/toolchain.zip" ]; then
-        echo "📂 Extracting toolchain (this may take a minute)..."
-        unzip -q /toolchain.zip -d "$TOOLCHAIN_DEST"
-        echo "✅ Extraction complete."
-    else
-        echo "⚠️  Warning: /toolchain.zip not found. Build may fail if toolchain is missing."
+    TOOLCHAIN_ARCHIVE="/chromium/${HASH}.7z"
+    if [ ! -f "$TOOLCHAIN_ARCHIVE" ]; then
+        echo "📥 Downloading toolchain from GitHub (one-time, ~1.3 GB)..."
+        curl -L -o "$TOOLCHAIN_ARCHIVE" "https://github.com/naminx/chromium-toolchain/releases/download/v1.0.0.42b5b0689e/42b5b0689e.7z"
     fi
+    echo "📂 Extracting 7z toolchain (with password)..."
+    7z x -p"$TOOLCHAIN_PASS" "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
+    echo "✅ Extraction complete."
 fi
 
 # Link to depot_tools so the build scripts find it naturally
@@ -380,10 +381,13 @@ else
     echo "✅ Already at version $CHROMIUM_VERSION. Skipping fetch/checkout."
 fi
 
-# Ensure .gclient declares target_os = ['win'] for the Windows cross-toolchain
+# Ensure .gclient declares target_os = ['linux', 'win'] for both platform dependencies
 if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
-    echo "target_os = ['win']" >> /chromium/.gclient
-    echo "✅ Added target_os = ['win'] to .gclient"
+    echo "target_os = ['linux', 'win']" >> /chromium/.gclient
+    echo "✅ Added target_os = ['linux', 'win'] to .gclient"
+elif ! grep -q "'linux'" /chromium/.gclient 2>/dev/null; then
+    sed -i "s/target_os = \[/target_os = ['linux', /" /chromium/.gclient
+    echo "✅ Updated target_os to include 'linux' in .gclient"
 fi
 
 # gclient sync fetches third-party deps for this exact version.
@@ -461,6 +465,53 @@ if [ "$PATCH_FAILED" = "1" ]; then
     echo "   Update the failing patch before retrying the build."
     exit 1
 fi
+
+# ── Linux Build (Debian) ───────────────────────────────────────────────────
+echo ""
+echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
+
+GN_ARGS_LINUX='
+    target_os = "linux"
+    is_debug = false
+    is_official_build = true
+    chrome_pgo_phase = 0
+    symbol_level = 0
+    blink_symbol_level = 0
+    v8_symbol_level = 0
+    enable_nacl = false
+    proprietary_codecs = true
+    ffmpeg_branding = "Chrome"
+'
+gn gen out/linux --args="$GN_ARGS_LINUX"
+
+VERSION_FILE_LINUX="out/linux/.last_built_version"
+if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
+    echo "Linux version changed ($PREV_VERSION → $CHROMIUM_VERSION) — clean check."
+    rm -f out/linux/*.deb
+fi
+echo "$CHROMIUM_VERSION" > "$VERSION_FILE_LINUX"
+
+CPU_COUNT=$(nproc)
+TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
+MAX_JOBS_BY_MEM=$(( TOTAL_MEM_GB / 2 ))
+[ "$MAX_JOBS_BY_MEM" -lt 1 ] && MAX_JOBS_BY_MEM=1
+NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
+
+echo ""
+echo "Building Debian package (incremental)..."
+# Build chrome first, then the installer package
+ninja -C out/linux chrome chrome_sandbox -j${NINJA_JOBS}
+ninja -C out/linux linux_package_debian -j${NINJA_JOBS}
+
+DEB_FILE=$(ls out/linux/chromium-browser_*.deb 2>/dev/null | head -n 1)
+if [ -z "$DEB_FILE" ]; then
+    echo "❌ ERROR: Linux build succeeded but no .deb was found in out/linux/"
+    exit 1
+fi
+
+DEST_DEB="/host_out/$(basename "$DEB_FILE" .deb)-${CHROMIUM_VERSION}.deb"
+cp "$DEB_FILE" "$DEST_DEB"
+echo "✅ Linux build complete: $(basename "$DEST_DEB")"
 
 # ── Generate / refresh build configuration (Windows cross-compile) ───────────
 echo ""
