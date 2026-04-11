@@ -21,15 +21,16 @@
 set -e
 
 usage() {
-    echo "Usage: $0 <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow]"
+    echo "Usage: $0 <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow] [--target <TARGET>]"
     echo ""
     echo "Options:"
     echo "  --from-cache <PREV>  Explicitly set the previous Chromium version. Needed for"
     echo "                       correct incremental time stamps when restoring external cache."
     echo "  --shallow            Use shallow git clone to save time and disk space."
+    echo "  --target <TARGET>    Target platform to build: 'deb', 'win', or 'all' (default: all)."
     echo ""
     echo "Example:"
-    echo "  $0 145.0.7632.116"
+    echo "  $0 145.0.7632.116 --target win"
     exit 1
 }
 
@@ -40,6 +41,7 @@ fi
 CHROMIUM_VERSION="$1"
 SHALLOW_CLONE="0"
 FROM_CACHE_VERSION=""
+BUILD_TARGET="all"
 
 shift || true
 while [ $# -gt 0 ]; do
@@ -52,6 +54,10 @@ while [ $# -gt 0 ]; do
             FROM_CACHE_VERSION="$2"
             shift 2
             ;;
+        --target)
+            BUILD_TARGET="$2"
+            shift 2
+            ;;
         *)
             shift
             ;;
@@ -59,7 +65,7 @@ while [ $# -gt 0 ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
-IMAGE_NAME="chromium-mv2-builder-v7"
+IMAGE_NAME="chromium-mv2-builder-v9"
 VOLUME_NAME="chromium-mv2-src"
 
 # Prefer docker (already installed); fall back to podman.
@@ -87,7 +93,7 @@ LABEL description="Chromium incremental build environment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
-    fuse ciopfs unzip 7zip patch gperf git-restore-mtime \
+    fuse ciopfs unzip p7zip-full patch gperf git-restore-mtime \
     && rm -rf /var/lib/apt/lists/*
 
 # depot_tools (contains gclient, fetch, gn)
@@ -134,6 +140,7 @@ $DOCKER run --rm -i \
     -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
     -e "TOOLCHAIN_PASS=${TOOLCHAIN_PASS}" \
     -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
+    -e "BUILD_TARGET=${BUILD_TARGET}" \
     -e "FROM_CACHE_VERSION=${FROM_CACHE_VERSION}" \
     -e "PATH=/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     -e "DEPOT_TOOLS_UPDATE=1" \
@@ -143,8 +150,16 @@ $DOCKER run --rm -i \
 set -e
 
 # Chromium's parallel build + ciopfs FUSE easily exhaust the default fd limit.
-# Raise it early before anything else runs.
 ulimit -n 65536 2>/dev/null || true
+
+# ── Git Optimizations (for 192GB RAM) ────────────────────────────────────────
+echo "🚀 Optimizing Git for high-performance networking/RAM..."
+git config --global core.deltaBaseCacheLimit 2G
+git config --global core.preloadIndex true
+git config --global core.fscache true
+git config --global http.postBuffer 1G
+git config --global pack.threads 0
+git config --global index.threads 0
 
 echo "════════════════════════════════════════════════════"
 echo " Target: Chromium $CHROMIUM_VERSION"
@@ -157,30 +172,40 @@ TOOLCHAIN_ROOT="/chromium/win_toolchain"
 HASH="42b5b0689e"
 TOOLCHAIN_DEST="$TOOLCHAIN_ROOT/vs_files/$HASH"
 
-# 1. Mount ciopfs (required for case-insensitive headers on Linux)
-mkdir -p "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files"
-if ! mountpoint -q "$TOOLCHAIN_ROOT/vs_files"; then
-    echo "📂 Mounting case-insensitive toolchain filesystem..."
-    ciopfs -o use_ino "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files" || true
-fi
-
-# 2. Extract toolchain if missing (Perform only once)
-if [ ! -f "$TOOLCHAIN_DEST/VS_VERSION" ]; then
-    echo "📦 Initializing Windows toolchain in volume..."
-    mkdir -p "$TOOLCHAIN_DEST"
-    TOOLCHAIN_ARCHIVE="/chromium/${HASH}.7z"
-    if [ ! -f "$TOOLCHAIN_ARCHIVE" ]; then
-        echo "📥 Downloading toolchain from GitHub (one-time, ~1.3 GB)..."
-        curl -L -o "$TOOLCHAIN_ARCHIVE" "https://github.com/naminx/chromium-toolchain/releases/download/v1.0.0.42b5b0689e/42b5b0689e.7z"
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+    # If we have lots of RAM, use tmpfs for the toolchain to speed up extraction
+    TOTAL_MEM=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+    if [ "$TOTAL_MEM_GB" -gt 64000000 ] && ! mountpoint -q "$TOOLCHAIN_ROOT"; then
+        echo "🚀 High RAM detected, mounting 10GB tmpfs for toolchain..."
+        mkdir -p "$TOOLCHAIN_ROOT"
+        mount -t tmpfs -o size=10G tmpfs "$TOOLCHAIN_ROOT" || echo "⚠️  Failed to mount tmpfs."
     fi
-    echo "📂 Extracting 7z toolchain (with password)..."
-    7z x -p"$TOOLCHAIN_PASS" "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
-    echo "✅ Extraction complete."
-fi
 
-# Link to depot_tools so the build scripts find it naturally
-mkdir -p /depot_tools/win_toolchain
-ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
+    # 1. Mount ciopfs (required for case-insensitive headers on Linux)
+    mkdir -p "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files"
+    if ! mountpoint -q "$TOOLCHAIN_ROOT/vs_files"; then
+        echo "📂 Mounting case-insensitive toolchain filesystem..."
+        ciopfs -o use_ino "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files" || true
+    fi
+
+    # 2. Extract toolchain if missing (Perform only once)
+    if [ ! -f "$TOOLCHAIN_DEST/VS_VERSION" ]; then
+        echo "📦 Initializing Windows toolchain in volume..."
+        mkdir -p "$TOOLCHAIN_DEST"
+        TOOLCHAIN_ARCHIVE="/chromium/${HASH}.7z"
+        if [ ! -f "$TOOLCHAIN_ARCHIVE" ]; then
+            echo "📥 Downloading toolchain from GitHub (one-time, ~1.3 GB)..."
+            curl -L -o "$TOOLCHAIN_ARCHIVE" "https://github.com/naminx/chromium-toolchain/releases/download/v1.0.0.42b5b0689e/42b5b0689e.7z"
+        fi
+        echo "📂 Extracting 7z toolchain (with password)..."
+        7z x -p"$TOOLCHAIN_PASS" "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
+        echo "✅ Extraction complete."
+    fi
+
+    # Link to depot_tools so the build scripts find it naturally
+    mkdir -p /depot_tools/win_toolchain
+    ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
+fi
 
 # DEPOT_TOOLS_WIN_TOOLCHAIN stays at default (1) so GetVisualStudioVersion()
 # returns '2022' without trying to auto-detect VS on Linux.
@@ -233,9 +258,7 @@ solutions = [
 GCLIENTEOF
 fi
 
-# Clone/sync with retry.  The Chromium source is ~30 GB and a single dropped
-# TCP packet causes git to abort with "invalid index-pack output".  We clean
-# up gclient's temp dirs before each attempt so it always starts fresh.
+# Clone/sync with retry.
 if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
     if [ -d "src" ]; then
         if [ -d "src/out" ]; then
@@ -249,7 +272,8 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
     fi
     for attempt in 1 2 3; do
         echo ""
-        echo "📥 Fetching Chromium source tree (~30 GB) — attempt ${attempt}/3..."
+        echo "📥 Fetching Chromium source tree — attempt ${attempt}/3..."
+        
         # Clean temp dirs from any previous failed attempt before retrying.
         find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
             echo "   🗑️  Sweeping corrupted component to background trash: $d"
@@ -264,15 +288,28 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
                 nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
             fi
         done
+
+        SYNC_SUCCESS=0
         if [ "$SHALLOW_CLONE" = "1" ]; then
-            SYNC_ARGS="--nohooks --no-history --revision src@refs/tags/$CHROMIUM_VERSION"
+            echo "🚀 Performing manual shallow clone of src tag $CHROMIUM_VERSION..."
+            if git clone --depth 1 --branch "$CHROMIUM_VERSION" https://chromium.googlesource.com/chromium/src.git src; then
+                echo "✅ Manual shallow clone of src complete."
+                # Now use gclient just for the DEPS
+                if gclient sync --nohooks --no-history --jobs $(nproc); then
+                    SYNC_SUCCESS=1
+                fi
+            fi
         else
-            SYNC_ARGS="--nohooks --with_branch_heads --with_tags"
+            if gclient sync --nohooks --with_branch_heads --with_tags --jobs $(nproc); then
+                SYNC_SUCCESS=1
+            fi
         fi
-        if gclient sync $SYNC_ARGS; then
+
+        if [ "$SYNC_SUCCESS" = "1" ]; then
             echo "✅ Source fetch complete."
             break
         fi
+
         if [ "$attempt" -lt 3 ]; then
             echo "⚠️  Fetch failed (attempt ${attempt}/3) — likely a transient network error."
             echo "   Waiting 60s before retry..."
@@ -289,6 +326,14 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
         mkdir -p src
         mv /tmp/saved_out src/out
     fi
+fi
+
+# ── Use RAM disk for 'out' directory if high RAM detected ────────────────────
+TOTAL_MEM=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+if [ "$TOTAL_MEM" -gt 128000000 ] && [ -d "src" ] && ! mountpoint -q "src/out"; then
+    echo "🚀 Ultra-High RAM detected (${TOTAL_MEM}KB), mounting 100GB tmpfs for 'out/' directory..."
+    mkdir -p src/out
+    mount -t tmpfs -o size=100G tmpfs src/out || echo "⚠️  Failed to mount tmpfs for out/."
 fi
 
 cd src
@@ -326,8 +371,10 @@ TCEOF
     fi
 }
 
-export GYP_MSVS_OVERRIDE_PATH="$TOOLCHAIN_DEST"
-export WINDOWSSDKDIR="$TOOLCHAIN_DEST/Windows Kits/10"
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+    export GYP_MSVS_OVERRIDE_PATH="$TOOLCHAIN_DEST"
+    export WINDOWSSDKDIR="$TOOLCHAIN_DEST/Windows Kits/10"
+fi
 # Keep =0 initially so 'gclient runhooks → vs_toolchain.py update --force' skips
 # the GCS download. DEPOT_TOOLS_WIN_TOOLCHAIN=0 makes Update() return 0
 # immediately without calling get_toolchain_if_necessary.py. We'll flip to 1
@@ -336,7 +383,9 @@ export DEPOT_TOOLS_WIN_TOOLCHAIN=0
 
 # First call – build/ may not exist yet if repo was just fetched,
 # but we try anyway; it will succeed once src/ exists.
-[ -d build ] && write_toolchain_json || true
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+    [ -d build ] && write_toolchain_json || true
+fi
 
 # Revert any previously applied patches and remove any untracked files that
 # would block git checkout (e.g. files created by gclient sync that are also
@@ -381,13 +430,21 @@ else
     echo "✅ Already at version $CHROMIUM_VERSION. Skipping fetch/checkout."
 fi
 
-# Ensure .gclient declares target_os = ['linux', 'win'] for both platform dependencies
-if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
-    echo "target_os = ['linux', 'win']" >> /chromium/.gclient
-    echo "✅ Added target_os = ['linux', 'win'] to .gclient"
-elif ! grep -q "'linux'" /chromium/.gclient 2>/dev/null; then
-    sed -i "s/target_os = \[/target_os = ['linux', /" /chromium/.gclient
-    echo "✅ Updated target_os to include 'linux' in .gclient"
+# Ensure .gclient declares target_os for platform dependencies
+if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
+        echo "target_os = ['linux', 'win']" >> /chromium/.gclient
+        echo "✅ Added target_os = ['linux', 'win'] to .gclient"
+    elif ! grep -q "'win'" /chromium/.gclient 2>/dev/null; then
+        sed -i "s/target_os = \[/target_os = ['win', /" /chromium/.gclient
+        echo "✅ Updated target_os to include 'win' in .gclient"
+    fi
+else
+    # Only building deb/linux
+    if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
+        echo "target_os = ['linux']" >> /chromium/.gclient
+        echo "✅ Added target_os = ['linux'] to .gclient"
+    fi
 fi
 
 # gclient sync fetches third-party deps for this exact version.
@@ -410,13 +467,15 @@ fi
 echo "✅ Source synced to $CHROMIUM_VERSION"
 
 # Force Chromium to accept our customized mounted Windows toolchain by rewriting its expectations
-if [ -f build/vs_toolchain.py ]; then
-    sed -i "s/TOOLCHAIN_HASH = .*/TOOLCHAIN_HASH = '42b5b0689e'/g" build/vs_toolchain.py
-    sed -i "s/subprocess.check_call(get_toolchain_args)/pass/g" build/vs_toolchain.py
-fi
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+    if [ -f build/vs_toolchain.py ]; then
+        sed -i "s/TOOLCHAIN_HASH = .*/TOOLCHAIN_HASH = '42b5b0689e'/g" build/vs_toolchain.py
+        sed -i "s/subprocess.check_call(get_toolchain_args)/pass/g" build/vs_toolchain.py
+    fi
 
-# Re-write toolchain JSON after sync (sync may recreate build/ directory)
-write_toolchain_json
+    # Re-write toolchain JSON after sync (sync may recreate build/ directory)
+    write_toolchain_json
+fi
 
 # ── Install / update Linux host build dependencies ───────────────────────────
 # These are the *host* tools needed to run the cross-compiler itself.
@@ -467,116 +526,132 @@ if [ "$PATCH_FAILED" = "1" ]; then
 fi
 
 # ── Linux Build (Debian) ───────────────────────────────────────────────────
-echo ""
-echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
+    CPU_COUNT=$(nproc)
+    TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
 
-GN_ARGS_LINUX='
-    target_os = "linux"
-    is_debug = false
-    is_official_build = true
-    chrome_pgo_phase = 0
-    symbol_level = 0
-    blink_symbol_level = 0
-    v8_symbol_level = 0
-    enable_nacl = false
-    proprietary_codecs = true
-    ffmpeg_branding = "Chrome"
-'
-gn gen out/linux --args="$GN_ARGS_LINUX"
+    # Account for RAM disks in available memory calculation
+    RESERVED_GB=0
+    if [ "$TOTAL_MEM_GB" -gt 128 ]; then
+        RESERVED_GB=110  # 100GB out + 10GB toolchain
+    elif [ "$TOTAL_MEM_GB" -gt 64 ]; then
+        RESERVED_GB=10   # 10GB toolchain only
+    fi
 
-VERSION_FILE_LINUX="out/linux/.last_built_version"
-if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
-    echo "Linux version changed ($PREV_VERSION → $CHROMIUM_VERSION) — clean check."
-    rm -f out/linux/*.deb
+    AVAILABLE_MEM_GB=$(( TOTAL_MEM_GB - RESERVED_GB ))
+    [ "$AVAILABLE_MEM_GB" -lt 16 ] && AVAILABLE_MEM_GB=16
+    
+    # Each clang-cl/link job takes ~2GB
+    MAX_JOBS_BY_MEM=$(( AVAILABLE_MEM_GB / 2 ))
+    NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
+    
+    # For linking, we can be more aggressive if we have RAM
+    CONCURRENT_LINKS=$(( AVAILABLE_MEM_GB / 16 ))
+    [ "$CONCURRENT_LINKS" -lt 1 ] && CONCURRENT_LINKS=1
+    [ "$CONCURRENT_LINKS" -gt 8 ] && CONCURRENT_LINKS=8 # Diminishing returns after 8
+
+    echo ""
+    echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
+
+    GN_ARGS_LINUX="
+        target_os = \"linux\"
+        is_debug = false
+        is_official_build = true
+        chrome_pgo_phase = 0
+        symbol_level = 0
+        blink_symbol_level = 0
+        v8_symbol_level = 0
+        enable_nacl = false
+        proprietary_codecs = true
+        ffmpeg_branding = \"Chrome\"
+        concurrent_links = $CONCURRENT_LINKS
+    "
+    gn gen out/linux --args="$GN_ARGS_LINUX"
+
+    echo ""
+    echo "Building Debian package (incremental)..."
+    # Build chrome first, then the installer package
+    ninja -C out/linux chrome chrome_sandbox -j${NINJA_JOBS}
+    ninja -C out/linux linux_package_debian -j${NINJA_JOBS}
+
+    DEB_FILE=$(ls out/linux/chromium-browser_*.deb 2>/dev/null | head -n 1)
+    if [ -z "$DEB_FILE" ]; then
+        echo "❌ ERROR: Linux build succeeded but no .deb was found in out/linux/"
+        exit 1
+    fi
+
+    DEST_DEB="/host_out/$(basename "$DEB_FILE" .deb)-${CHROMIUM_VERSION}.deb"
+    cp "$DEB_FILE" "$DEST_DEB"
+    echo "✅ Linux build complete: $(basename "$DEST_DEB")"
 fi
-echo "$CHROMIUM_VERSION" > "$VERSION_FILE_LINUX"
-
-CPU_COUNT=$(nproc)
-TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-MAX_JOBS_BY_MEM=$(( TOTAL_MEM_GB / 2 ))
-[ "$MAX_JOBS_BY_MEM" -lt 1 ] && MAX_JOBS_BY_MEM=1
-NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
-
-echo ""
-echo "Building Debian package (incremental)..."
-# Build chrome first, then the installer package
-ninja -C out/linux chrome chrome_sandbox -j${NINJA_JOBS}
-ninja -C out/linux linux_package_debian -j${NINJA_JOBS}
-
-DEB_FILE=$(ls out/linux/chromium-browser_*.deb 2>/dev/null | head -n 1)
-if [ -z "$DEB_FILE" ]; then
-    echo "❌ ERROR: Linux build succeeded but no .deb was found in out/linux/"
-    exit 1
-fi
-
-DEST_DEB="/host_out/$(basename "$DEB_FILE" .deb)-${CHROMIUM_VERSION}.deb"
-cp "$DEB_FILE" "$DEST_DEB"
-echo "✅ Linux build complete: $(basename "$DEST_DEB")"
 
 # ── Generate / refresh build configuration (Windows cross-compile) ───────────
-echo ""
-echo "⚙️  Configuring Windows cross-compile build (gn gen)..."
+if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+    echo ""
+    echo "⚙️  Configuring Windows cross-compile build (gn gen)..."
 
-GN_ARGS='
-    target_os = "win"
-    is_debug = false
-    is_official_build = true
-    chrome_pgo_phase = 0
-    symbol_level = 0
-    blink_symbol_level = 0
-    v8_symbol_level = 0
-    enable_nacl = false
-    proprietary_codecs = true
-    ffmpeg_branding = "Chrome"
-'
-# Always run gn gen — it is idempotent and takes ~5s. The previous conditional
-# used a fragile whitespace comparison that always triggered a re-run anyway,
-# and the re-run could confuse ninja's dependency tracking.
-echo "⚙️  Configuring build (gn gen)..."
-gn gen out/win --args="$GN_ARGS"
+    GN_ARGS="
+        target_os = \"win\"
+        is_debug = false
+        is_official_build = true
+        chrome_pgo_phase = 0
+        symbol_level = 0
+        blink_symbol_level = 0
+        v8_symbol_level = 0
+        enable_nacl = false
+        proprietary_codecs = true
+        ffmpeg_branding = \"Chrome\"
+        concurrent_links = $CONCURRENT_LINKS
+    "
+    # Always run gn gen — it is idempotent and takes ~5s. The previous conditional
+    # used a fragile whitespace comparison that always triggered a re-run anyway,
+    # and the re-run could confuse ninja's dependency tracking.
+    echo "⚙️  Configuring build (gn gen)..."
+    gn gen out/win --args="$GN_ARGS"
 
-# If the version changed, delete mini_installer.exe to force a relink.
-# (An OOM-killed mid-build leaves the previous version's .exe which ninja
-# otherwise considers up-to-date and never retouches.)
-# PREV_VERSION was read near the top of this script now that VERSION_FILE
-# is defined early — no need to re-read it here.
-if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
-    echo "Version changed ($PREV_VERSION → $CHROMIUM_VERSION) — forcing relink."
-    rm -f out/win/mini_installer.exe out/win/mini_installer.exe.pdb
+    # If the version changed, delete mini_installer.exe to force a relink.
+    # (An OOM-killed mid-build leaves the previous version's .exe which ninja
+    # otherwise considers up-to-date and never retouches.)
+    # PREV_VERSION was read near the top of this script now that VERSION_FILE
+    # is defined early — no need to re-read it here.
+    if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
+        echo "Version changed ($PREV_VERSION → $CHROMIUM_VERSION) — forcing relink."
+        rm -f out/win/mini_installer.exe out/win/mini_installer.exe.pdb
+    fi
+    echo "$CHROMIUM_VERSION" > "$VERSION_FILE"
+
+    CPU_COUNT=$(nproc)
+
+    # clang-cl Windows cross-compile uses ~2 GB RAM per parallel job.
+    # Cap job count so we don't OOM-kill workers silently on home PCs.
+    TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
+    MAX_JOBS_BY_MEM=$(( TOTAL_MEM_GB / 2 ))
+    [ "$MAX_JOBS_BY_MEM" -lt 1 ] && MAX_JOBS_BY_MEM=1
+    NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
+    echo "   CPUs: $CPU_COUNT  |  RAM: ${TOTAL_MEM_GB}GB  |  ninja -j${NINJA_JOBS}"
+
+    echo ""
+    echo "Building mini_installer.exe (incremental)..."
+
+    # Use the explicit filename target so ninja is forced to rebuild the real file,
+    # not satisfy a phony alias that might incorrectly report 'up to date'.
+    ninja -C out/win mini_installer.exe -j${NINJA_JOBS}
+
+    if [ ! -f out/win/mini_installer.exe ]; then
+        echo "❌ ERROR: ninja succeeded but mini_installer.exe was not produced!"
+        echo "   This usually means the target was already considered up-to-date."
+        echo "   Try running: docker run --rm -v chromium-mv2-src:/c ubuntu:22.04 rm /c/src/out/win/mini_installer.exe"
+        exit 1
+    fi
+
+    DEST="/host_out/mini_installer-${CHROMIUM_VERSION}.exe"
+    cp out/win/mini_installer.exe "$DEST"
+
+    echo ""
+    echo "════════════════════════════════════════════════════"
+    echo " ✅ SUCCESS!"
+    echo "    mini_installer-${CHROMIUM_VERSION}.exe"
+    echo "    has been copied to your build-docker.sh directory."
+    echo "════════════════════════════════════════════════════"
 fi
-echo "$CHROMIUM_VERSION" > "$VERSION_FILE"
-
-CPU_COUNT=$(nproc)
-
-# clang-cl Windows cross-compile uses ~2 GB RAM per parallel job.
-# Cap job count so we don't OOM-kill workers silently on home PCs.
-TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-MAX_JOBS_BY_MEM=$(( TOTAL_MEM_GB / 2 ))
-[ "$MAX_JOBS_BY_MEM" -lt 1 ] && MAX_JOBS_BY_MEM=1
-NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
-echo "   CPUs: $CPU_COUNT  |  RAM: ${TOTAL_MEM_GB}GB  |  ninja -j${NINJA_JOBS}"
-
-echo ""
-echo "Building mini_installer.exe (incremental)..."
-
-# Use the explicit filename target so ninja is forced to rebuild the real file,
-# not satisfy a phony alias that might incorrectly report 'up to date'.
-ninja -C out/win mini_installer.exe -j${NINJA_JOBS}
-
-if [ ! -f out/win/mini_installer.exe ]; then
-    echo "❌ ERROR: ninja succeeded but mini_installer.exe was not produced!"
-    echo "   This usually means the target was already considered up-to-date."
-    echo "   Try running: docker run --rm -v chromium-mv2-src:/c ubuntu:22.04 rm /c/src/out/win/mini_installer.exe"
-    exit 1
-fi
-
-DEST="/host_out/mini_installer-${CHROMIUM_VERSION}.exe"
-cp out/win/mini_installer.exe "$DEST"
-
-echo ""
-echo "════════════════════════════════════════════════════"
-echo " ✅ SUCCESS!"
-echo "    mini_installer-${CHROMIUM_VERSION}.exe"
-echo "    has been copied to your build-docker.sh directory."
-echo "════════════════════════════════════════════════════"
 INNER

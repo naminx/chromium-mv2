@@ -5,24 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GDRIVE_REMOTE="${GDRIVE_REMOTE:-gdrive}"
 GDRIVE_PATH="chromium-mv2-cache"
 RCLONE_CONF="${HOME}/.config/rclone/rclone.conf"
-
 if [ -z "$1" ] || [ -z "$2" ]; then
     echo "Usage: ./build-binaries-on-hetzner.sh <HETZNER_IP> <CHROMIUM_VERSION> [OPTIONS]"
     echo ""
     echo "  --from-cache <PREV>   Restore cached out/win/ from Google Drive before building."
-    echo "                        Only needed on the very first run (no snapshot exists yet)."
-    echo "  --api <TOKEN>         Hetzner API token. REQUIRED for snapshot+delete behaviour."
-    echo "                        On both success AND failure the script will:"
-    echo "                          1. Create a Hetzner snapshot of the server disk"
-    echo "                             (preserves the full ~30 GB source tree + build artifacts"
-    echo "                              in the Docker volume — avoids a 2-hour re-sync next time)"
-    echo "                          2. Wait for the snapshot to finish"
-    echo "                          3. Delete the server so you are not billed for idle time"
-    echo ""
-    echo "Snapshot workflow:"
-    echo "  First run  : create a plain Hetzner server, run this script with --api <TOKEN>"
-    echo "  Next runs  : create a new server from the last snapshot, run with --api <TOKEN>"
-    echo "               (no --from-cache needed — source tree is already on the snapshot disk)"
+    echo "  --api <TOKEN>         Hetzner API token. If provided, the server will"
+    echo "                        SELF-DESTRUCT after a successful build + upload."
+    echo "  --target <TARGET>     Target platform: 'deb', 'win', or 'all' (default: all)."
     echo ""
     echo "Google Drive remote (default: 'gdrive'): GDRIVE_REMOTE=myname ./build-binaries-on-hetzner.sh ..."
     echo "Artifacts stored in Google Drive folder : $GDRIVE_PATH/"
@@ -37,8 +26,10 @@ USE_CACHE=0
 PREV_VERSION=""
 
 HETZNER_API=""
+BUILD_TARGET="all"
+SHALLOW_CLONE="0"
 
-# Parse remaining flags (--from-cache <PREV> and/or --api <TOKEN>, any order)
+# Parse remaining flags (--from-cache <PREV>, --api <TOKEN>, --target <TARGET>, --shallow any order)
 SHIFT_ARGS=("$@")
 for (( i=2; i<${#SHIFT_ARGS[@]}; i++ )); do
     if [ "${SHIFT_ARGS[$i]}" = "--from-cache" ] && [ -n "${SHIFT_ARGS[$((i+1))]}" ]; then
@@ -48,6 +39,11 @@ for (( i=2; i<${#SHIFT_ARGS[@]}; i++ )); do
     elif [ "${SHIFT_ARGS[$i]}" = "--api" ] && [ -n "${SHIFT_ARGS[$((i+1))]}" ]; then
         HETZNER_API="${SHIFT_ARGS[$((i+1))]}"
         i=$((i+1))
+    elif [ "${SHIFT_ARGS[$i]}" = "--target" ] && [ -n "${SHIFT_ARGS[$((i+1))]}" ]; then
+        BUILD_TARGET="${SHIFT_ARGS[$((i+1))]}"
+        i=$((i+1))
+    elif [ "${SHIFT_ARGS[$i]}" = "--shallow" ]; then
+        SHALLOW_CLONE="1"
     fi
 done
 
@@ -61,18 +57,18 @@ if [ ! -f "$RCLONE_CONF" ]; then
 fi
 
 echo "====================================================================="
-echo "Chromium Build on Hetzner (Linux + Windows) [snapshot mode]"
+echo "Chromium Build on Hetzner (Linux + Windows)"
 echo "  Version : $CHROMIUM_VERSION"
+echo "  Target  : $BUILD_TARGET"
 if [ "$USE_CACHE" = "1" ]; then
     echo "  Cache   : $GDRIVE_REMOTE:$GDRIVE_PATH/out-win-${PREV_VERSION}.tar.gz"
 fi
-echo "  Debian  : chromium-browser-*.deb (pull locally on success)"
-echo "  Windows : $GDRIVE_REMOTE:$GDRIVE_PATH/releases/mini_installer-${CHROMIUM_VERSION}.exe"
-echo "  out/    : preserved in Hetzner snapshot — no GDrive tarball needed"
+[ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ] && echo "  Debian  : $GDRIVE_REMOTE:$GDRIVE_PATH/releases/chromium-browser-${CHROMIUM_VERSION}.deb"
+[ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ] && echo "  Windows : $GDRIVE_REMOTE:$GDRIVE_PATH/releases/mini_installer-${CHROMIUM_VERSION}.exe"
 if [ -n "$HETZNER_API" ]; then
-    echo "  📸 API TOKEN SET: server will SNAPSHOT then SELF-DESTRUCT on successful build."
+    echo "  💥 API TOKEN SET: server will SELF-DESTRUCT on successful build."
 else
-    echo "  ⚠️  No API token: no snapshot will be taken and you must delete the server manually."
+    echo "  ⚠️  No API token: you must delete the server manually when done."
 fi
 echo "Make sure your patches/ are saved locally! Press Enter to proceed (Ctrl+C to abort)."
 read -rp "..."
@@ -91,8 +87,10 @@ PREV_VERSION="$PREV_VERSION"
 GDRIVE_REMOTE="$GDRIVE_REMOTE"
 GDRIVE_PATH="$GDRIVE_PATH"
 HETZNER_API="$HETZNER_API"
+BUILD_TARGET="$BUILD_TARGET"
+SHALLOW_CLONE="$SHALLOW_CLONE"
 TOOLCHAIN_HASH="42b5b0689e"
-TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
+export TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
 EOF
 
 # Part 2: script body — single-quoted so NO local expansion; all $VAR are remote
@@ -128,9 +126,11 @@ fi
 
 # ── Step 2: Build ─────────────────────────────────────────────────────────────
 echo ""
-BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION"
+BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION --target $BUILD_TARGET"
+[ "$SHALLOW_CLONE" = "1" ] && BUILD_CMD="$BUILD_CMD --shallow"
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
-    BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
+    BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION --target $BUILD_TARGET"
+    [ "$SHALLOW_CLONE" = "1" ] && BUILD_CMD="$BUILD_CMD --shallow"
 fi
 echo "🏗️  Starting $BUILD_CMD ..."
 
@@ -149,18 +149,25 @@ if $BUILD_CMD; then
     echo ""
     echo "☁️  Uploading installers to ${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/ ..."
     
-    if rclone copy "/root/chromium-mv2/${EXE_NAME}" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
-        echo "✅ Windows installer uploaded."
-        EXE_UPLOADED=1
+    if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
+        if rclone copy "/root/chromium-mv2/${EXE_NAME}" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
+            echo "✅ Windows installer uploaded."
+            EXE_UPLOADED=1
+        else
+            echo "⚠️  WARNING: Windows installer upload FAILED."
+        fi
     else
-        echo "⚠️  WARNING: Windows installer upload FAILED."
+        # For non-Windows builds, we mark this as 1 so self-destruct can proceed
+        EXE_UPLOADED=1
     fi
 
-    if [ -n "$DEB_NAME" ]; then
-        if rclone copy "$DEB_NAME" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
-            echo "✅ Debian package uploaded."
-        else
-            echo "⚠️  WARNING: Debian package upload FAILED."
+    if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
+        if [ -n "$DEB_NAME" ]; then
+            if rclone copy "$DEB_NAME" "${GDRIVE_REMOTE}:${GDRIVE_PATH}/releases/" --progress; then
+                echo "✅ Debian package uploaded."
+            else
+                echo "⚠️  WARNING: Debian package upload FAILED."
+            fi
         fi
     fi
 
@@ -169,25 +176,12 @@ if $BUILD_CMD; then
     else
         echo "⚠️  WARNING: One or more uploads failed. Server will NOT be deleted automatically."
     fi
-
-    # Step 3b skipped: out/win/ is preserved in the Hetzner snapshot.
-    # No GDrive tarball needed — the snapshot is cheaper and faster than
-    # archiving + uploading tens of GB just to restore them next time.
 else
     echo ""
     echo "❌ BUILD FAILED at $(date). See log above."
 fi
 
-# ── Step 4: Snapshot + self-destruct (SUCCESS only) ──────────────────────────
-# On build FAILURE the server is intentionally kept alive.  Reason: snapshotting
-# then restoring costs at minimum one full billing hour ($0.708).  It is cheaper
-# to leave the server running, fix the patch/issue interactively, and re-run
-# /root/autonomous_build.sh directly — no restore charge at all.
-#
-# On SUCCESS the snapshot captures the entire server disk (Docker volume at
-# /var/lib/docker/volumes/chromium-mv2-src/) preserving the full ~30 GB source
-# tree + build artifacts.  The next weekly build restores from this snapshot and
-# skips the 2-hour gclient sync entirely.
+# ── Step 4: Self-destruct (SUCCESS only) ─────────────────────────────────────
 if [ -n "$HETZNER_API" ]; then
     SERVER_ID=$(curl -s http://169.254.169.254/hetzner/v1/metadata/instance-id)
 
@@ -203,63 +197,12 @@ if [ -n "$HETZNER_API" ]; then
         echo "     scp root@<SERVER_IP>:/root/chromium-mv2/mini_installer-${CHROMIUM_VERSION}.exe ./"
         echo "   Then delete the server from the Hetzner dashboard."
     else
-        # Build succeeded AND exe is safely on GDrive — snapshot then delete.
-        SNAPSHOT_DESC="chromium-mv2-${CHROMIUM_VERSION}-$(date +%Y%m%d)"
         echo ""
-        echo "📸 Creating Hetzner snapshot: \"${SNAPSHOT_DESC}\" ..."
-        echo "   (Preserves source tree + build volume for the next incremental build)"
-        SNAPSHOT_RESPONSE=$(curl -sf -X POST \
-            -H "Authorization: Bearer $HETZNER_API" \
-            -H "Content-Type: application/json" \
-            -d "{\"description\": \"${SNAPSHOT_DESC}\", \"type\": \"snapshot\"}" \
-            "https://api.hetzner.cloud/v1/servers/${SERVER_ID}/actions/create_image" || echo "{}")
-
-        ACTION_ID=$(echo "$SNAPSHOT_RESPONSE" | python3 -c \
-            "import sys,json; d=json.load(sys.stdin); print(d.get('action',{}).get('id',''))" 2>/dev/null || true)
-        IMAGE_ID=$(echo "$SNAPSHOT_RESPONSE" | python3 -c \
-            "import sys,json; d=json.load(sys.stdin); print(d.get('image',{}).get('id',''))" 2>/dev/null || true)
-
-        if [ -n "$ACTION_ID" ]; then
-            echo "⏳ Waiting for snapshot to finish (action ${ACTION_ID}, up to 20 min)..."
-            SNAP_OK=0
-            for i in $(seq 1 240); do   # 240 × 10 s = 40 minutes max
-                STATUS=$(curl -sf \
-                    -H "Authorization: Bearer $HETZNER_API" \
-                    "https://api.hetzner.cloud/v1/actions/${ACTION_ID}" | \
-                    python3 -c "import sys,json; print(json.load(sys.stdin)['action']['status'])" \
-                    2>/dev/null || echo "error")
-                if [ "$STATUS" = "success" ]; then
-                    SNAP_OK=1
-                    echo "✅ Snapshot ready (image id: ${IMAGE_ID})."
-                    echo "   ➡  Next build: create a Hetzner server from image ${IMAGE_ID}"
-                    echo "      then run: ./build-binaries-on-hetzner.sh <NEW_IP> <NEW_VER> --api <TOKEN>"
-                    break
-                elif [ "$STATUS" = "error" ]; then
-                    echo "⚠️  Snapshot action reported an error — skipping deletion to preserve data."
-                    echo "   Delete the server manually from the Hetzner dashboard when ready."
-                    break
-                fi
-                echo "   ... snapshot progress check ${i}/120 (status: ${STATUS})"
-                sleep 10
-            done
-            if [ "$SNAP_OK" = "0" ] && [ "$STATUS" != "error" ]; then
-                echo "⚠️  Snapshot did not finish within 40 minutes."
-                echo "   Check Hetzner dashboard for image status before deleting the server."
-            fi
-        else
-            echo "⚠️  Could not parse snapshot action id from API response."
-            echo "   Response: $SNAPSHOT_RESPONSE"
-            echo "   Skipping deletion — check Hetzner dashboard manually."
-        fi
-
-        if [ "$SNAP_OK" = "1" ]; then
-            echo ""
-            echo "💥 Self-destructing server (snapshot safe, installer on GDrive)..."
-            curl -sf -X DELETE -H "Authorization: Bearer $HETZNER_API" \
-                "https://api.hetzner.cloud/v1/servers/${SERVER_ID}" && \
-                echo "✅ Server deletion request sent." || \
-                echo "⚠️  Self-destruct request failed — delete manually from Hetzner dashboard."
-        fi
+        echo "💥 Self-destructing server (installer on GDrive)..."
+        curl -sf -X DELETE -H "Authorization: Bearer $HETZNER_API" \
+            "https://api.hetzner.cloud/v1/servers/${SERVER_ID}" && \
+            echo "✅ Server deletion request sent." || \
+            echo "⚠️  Self-destruct request failed — delete manually from Hetzner dashboard."
     fi
 fi
 SCRIPTEND
@@ -291,14 +234,6 @@ echo "⚙️  Configuring Hetzner environment and launching build..."
 ssh $SSH_OPTS root@$HETZNER_IP << EOF
 set -e
 
-echo "⚙️ Swap setup..."
-if [ ! -f /swapfile ]; then
-    fallocate -l 16G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-    echo "✅ 16GB swap enabled."
-else
-    echo "✅ Swap exists."
-fi
-
 echo "📦 Installing Docker + rclone (if missing)..."
 if ! command -v docker &>/dev/null; then
     apt-get update -qq && apt-get install -y -qq docker.io
@@ -321,11 +256,9 @@ echo "When done (success), download the installers from Google Drive:"
 echo "  rclone copy $GDRIVE_REMOTE:$GDRIVE_PATH/releases/ ./"
 echo ""
 if [ -n "$HETZNER_API" ]; then
-    echo "📸 API TOKEN DETECTED: server will SNAPSHOT itself then SELF-DELETE"
-    echo "   on BOTH build success and failure."
+    echo "💥 API TOKEN DETECTED: server will SELF-DELETE on build success."
 else
-    echo "⚠️  NO API TOKEN: no snapshot will be taken."
-    echo "   You MUST delete the server manually from the Hetzner dashboard."
+    echo "⚠️  NO API TOKEN: you MUST delete the server manually."
 fi
 echo "====================================================================="
 EOF

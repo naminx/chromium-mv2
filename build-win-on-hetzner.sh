@@ -80,7 +80,7 @@ GDRIVE_REMOTE="$GDRIVE_REMOTE"
 GDRIVE_PATH="$GDRIVE_PATH"
 HETZNER_API="$HETZNER_API"
 TOOLCHAIN_HASH="42b5b0689e"
-TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
+export TOOLCHAIN_PASS="$TOOLCHAIN_PASS"
 EOF
 
 # Part 2: script body — single-quoted so NO local expansion; all $VAR are remote
@@ -117,9 +117,9 @@ fi
 
 # ── Step 2: Build ─────────────────────────────────────────────────────────────
 echo ""
-BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION"
+BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION"
 if [ "$USE_CACHE" = "1" ] && [ -n "$PREV_VERSION" ]; then
-    BUILD_CMD="TOOLCHAIN_PASS=$TOOLCHAIN_PASS ./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
+    BUILD_CMD="./build-docker.sh $CHROMIUM_VERSION --from-cache $PREV_VERSION"
 fi
 echo "🏗️  Starting $BUILD_CMD ..."
 if $BUILD_CMD; then
@@ -191,14 +191,6 @@ scp $SSH_OPTS "$RCLONE_CONF" root@$HETZNER_IP:/root/.config/rclone/rclone.conf
 echo "⚙️  Configuring Hetzner environment and launching build..."
 ssh $SSH_OPTS root@$HETZNER_IP << EOF
 set -e
-
-echo "⚙️ Swap setup..."
-if [ ! -f /swapfile ]; then
-    fallocate -l 16G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-    echo "✅ 16GB swap enabled."
-else
-    echo "✅ Swap exists."
-fi
 
 echo "📦 Installing Docker + rclone (if missing)..."
 if ! command -v docker &>/dev/null; then
