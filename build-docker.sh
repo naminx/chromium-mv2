@@ -65,7 +65,7 @@ while [ $# -gt 0 ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
-IMAGE_NAME="chromium-mv2-builder-v10"
+IMAGE_NAME="chromium-mv2-builder-v12"
 VOLUME_NAME="chromium-mv2-src"
 
 # Prefer docker (already installed); fall back to podman.
@@ -93,7 +93,8 @@ LABEL description="Chromium incremental build environment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
-    fuse ciopfs unzip p7zip-full pkg-config patch gperf git-restore-mtime \
+    fuse ciopfs unzip p7zip-full pkg-config binutils rpm dpkg-dev patch gperf git-restore-mtime \
+    devscripts fakeroot \
     && rm -rf /var/lib/apt/lists/*
 
 # depot_tools (contains gclient, fetch, gn)
@@ -124,6 +125,7 @@ echo ""
 echo "🚀 Launching build container for Chromium $CHROMIUM_VERSION..."
 echo "   Source volume : $VOLUME_NAME (persistent)"
 echo "   Patches dir   : $PATCHES_DIR"
+[ -d "${SCRIPT_DIR}/out_ramdisk" ] && echo "   Artifacts     : RAM disk (host-side, persistent)"
 echo ""
 
 $DOCKER run --rm -i \
@@ -136,7 +138,7 @@ $DOCKER run --rm -i \
     -v "${VOLUME_NAME}:/chromium" \
     -v "${PATCHES_DIR}:/patches:ro" \
     -v "${SCRIPT_DIR}:/host_out" \
-    -v "${SCRIPT_DIR}/tools/do_package.sh:/host_out/do_package.sh:ro" \
+    $( [ -d "${SCRIPT_DIR}/out_ramdisk" ] && echo "-v ${SCRIPT_DIR}/out_ramdisk:/chromium/src/out" ) \
     -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
     -e "TOOLCHAIN_PASS=${TOOLCHAIN_PASS}" \
     -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
@@ -261,13 +263,11 @@ fi
 # Clone/sync with retry.
 if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
     if [ -d "src" ]; then
-        if [ -d "src/out" ]; then
-            echo "📦 Saving out/ directory from broken src (preventing cache loss)..."
-            mv src/out /tmp/saved_out
-        fi
-        echo "🗑️  Moving broken partial src/ checkout to trash..."
-        TRASH_DIR=".trash_src_$(date +%s)"
-        mv src "$TRASH_DIR"
+        echo "🗑️  Cleaning broken partial src/ checkout (preserving out/)..."
+        TRASH_DIR="/chromium/.trash_src_$(date +%s)"
+        mkdir -p "$TRASH_DIR"
+        # Move everything EXCEPT 'out' to trash
+        find src -maxdepth 1 ! -name 'src' ! -name 'out' -exec mv {} "$TRASH_DIR/" + 2>/dev/null || true
         nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
     fi
     for attempt in 1 2 3; do
@@ -291,9 +291,13 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
 
         SYNC_SUCCESS=0
         if [ "$SHALLOW_CLONE" = "1" ]; then
-            echo "🚀 Performing manual shallow clone of src tag $CHROMIUM_VERSION..."
-            if git clone --depth 1 --branch "$CHROMIUM_VERSION" https://chromium.googlesource.com/chromium/src.git src; then
-                echo "✅ Manual shallow clone of src complete."
+            echo "🚀 Performing manual shallow fetch of src tag $CHROMIUM_VERSION..."
+            mkdir -p src
+            if git -C src init && \
+               git -C src remote add origin https://chromium.googlesource.com/chromium/src.git && \
+               git -C src fetch --depth 1 origin "refs/tags/$CHROMIUM_VERSION" && \
+               git -C src checkout FETCH_HEAD; then
+                echo "✅ Manual shallow fetch of src complete."
                 # Now use gclient just for the DEPS
                 if gclient sync --nohooks --no-history --jobs $(nproc); then
                     SYNC_SUCCESS=1
@@ -326,14 +330,6 @@ if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
         mkdir -p src
         mv /tmp/saved_out src/out
     fi
-fi
-
-# ── Use RAM disk for 'out' directory if high RAM detected ────────────────────
-TOTAL_MEM=$(awk '/MemTotal/{print $2}' /proc/meminfo)
-if [ "$TOTAL_MEM" -gt 128000000 ] && [ -d "src" ] && ! mountpoint -q "src/out"; then
-    echo "🚀 Ultra-High RAM detected (${TOTAL_MEM}KB), mounting 100GB tmpfs for 'out/' directory..."
-    mkdir -p src/out
-    mount -t tmpfs -o size=100G tmpfs src/out || echo "⚠️  Failed to mount tmpfs for out/."
 fi
 
 cd src
@@ -567,13 +563,21 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
     "
     gn gen out/linux --args="$GN_ARGS_LINUX"
 
+    echo "🔍 Validating Linux build targets..."
+    if ! ninja -C out/linux -n chrome chrome_sandbox chrome/installer/linux:stable >/dev/null 2>&1; then
+        echo "❌ ERROR: One or more Ninja targets are invalid for this version of Chromium."
+        echo "   Check: chrome, chrome_sandbox, chrome/installer/linux:stable"
+        exit 1
+    fi
+
     echo ""
     echo "Building Debian package (incremental)..."
     # Build chrome first, then the installer package
     ninja -C out/linux chrome chrome_sandbox -j${NINJA_JOBS}
-    ninja -C out/linux linux_package_debian -j${NINJA_JOBS}
+    ninja -C out/linux chrome/installer/linux:stable_deb -j${NINJA_JOBS}
 
-    DEB_FILE=$(ls out/linux/chromium-browser_*.deb 2>/dev/null | head -n 1)
+    # Search for the deb in the linux output dir
+    DEB_FILE=$(find out/linux -name "chromium-browser-stable_*.deb" | head -n 1)
     if [ -z "$DEB_FILE" ]; then
         echo "❌ ERROR: Linux build succeeded but no .deb was found in out/linux/"
         exit 1
@@ -606,6 +610,12 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
     # and the re-run could confuse ninja's dependency tracking.
     echo "⚙️  Configuring build (gn gen)..."
     gn gen out/win --args="$GN_ARGS"
+
+    echo "🔍 Validating Windows build targets..."
+    if ! ninja -C out/win -n mini_installer.exe >/dev/null 2>&1; then
+        echo "❌ ERROR: Ninja target 'mini_installer.exe' is invalid for this version of Chromium."
+        exit 1
+    fi
 
     # If the version changed, delete mini_installer.exe to force a relink.
     # (An OOM-killed mid-build leaves the previous version's .exe which ninja

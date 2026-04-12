@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-index f95a360b..0ae7ff24 100644
+index 34e8e709326f5..f6514b640c04a 100644
 --- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 +++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 @@ -32,6 +32,7 @@
@@ -10,7 +10,7 @@ index f95a360b..0ae7ff24 100644
  
  #include "base/feature_list.h"
  #include "base/functional/callback_helpers.h"
-@@ -1366,7 +1367,27 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
+@@ -1367,7 +1368,27 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
      return String();
    }
  
@@ -39,7 +39,7 @@ index f95a360b..0ae7ff24 100644
      exception_state.ThrowSecurityError("Tainted canvases may not be exported.");
      return String();
    }
-@@ -1377,7 +1398,7 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
+@@ -1378,7 +1399,7 @@ String HTMLCanvasElement::toDataURL(const String& mime_type,
      if (v8_value->IsNumber())
        quality = v8_value.As<v8::Number>()->Value();
    }

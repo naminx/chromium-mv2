@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/extension_management_internal.h b/chrome/browser/extensions/extension_management_internal.h
-index 93d03b3e..dc6a5812 100644
+index 93d03b3e62444..dc6a581236bbb 100644
 --- a/chrome/browser/extensions/extension_management_internal.h
 +++ b/chrome/browser/extensions/extension_management_internal.h
 @@ -189,7 +189,7 @@ struct GlobalSettings {
@@ -12,7 +12,7 @@ index 93d03b3e..dc6a5812 100644
    UnpublishedAvailability unpublished_availability_setting =
        UnpublishedAvailability::kAllowUnpublished;
 diff --git a/extensions/browser/extension_prefs.cc b/extensions/browser/extension_prefs.cc
-index d181bffe..841ba9fa 100644
+index f1294e12739dd..adac498a02e10 100644
 --- a/extensions/browser/extension_prefs.cc
 +++ b/extensions/browser/extension_prefs.cc
 @@ -1,4 +1,4 @@
@@ -21,7 +21,7 @@ index d181bffe..841ba9fa 100644
  // Use of this source code is governed by a BSD-style license that can be
  // found in the LICENSE file.
  
-@@ -2237,7 +2237,7 @@ void ExtensionPrefs::RegisterProfilePrefs(
+@@ -2215,7 +2215,7 @@ void ExtensionPrefs::RegisterProfilePrefs(
    registry->RegisterDictionaryPref(pref_names::kExtensionManagement);
    registry->RegisterDictionaryPref(pref_names::kOAuthRedirectUrls);
    registry->RegisterListPref(pref_names::kAllowedTypes);
@@ -31,7 +31,7 @@ index d181bffe..841ba9fa 100644
    registry->RegisterStringPref(pref_names::kLastChromeVersion, std::string());
    registry->RegisterDictionaryPref(kInstallSignature);
 diff --git a/extensions/common/extension.cc b/extensions/common/extension.cc
-index 25f6860b..34a98b5c 100644
+index 0e0152871689c..98f5183e72f12 100644
 --- a/extensions/common/extension.cc
 +++ b/extensions/common/extension.cc
 @@ -1,4 +1,4 @@
@@ -40,7 +40,7 @@ index 25f6860b..34a98b5c 100644
  // Use of this source code is governed by a BSD-style license that can be
  // found in the LICENSE file.
  
-@@ -62,7 +62,7 @@ constexpr int kPEMOutputColumns = 64;
+@@ -63,7 +63,7 @@ constexpr int kPEMOutputColumns = 64;
  static_assert(kMaximumSupportedManifestVersion >=
                    kMinimumSupportedManifestVersion,
                "The modern manifest version must be supported.");

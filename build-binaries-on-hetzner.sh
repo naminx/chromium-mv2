@@ -234,6 +234,17 @@ echo "⚙️  Configuring Hetzner environment and launching build..."
 ssh $SSH_OPTS root@$HETZNER_IP << EOF
 set -e
 
+# Setup host-side RAM disk for build artifacts (out/) if high RAM is available.
+# This allows 'out/' to persist across container failures/restarts on the same host.
+TOTAL_MEM_KB=\$(awk '/MemTotal/{print \$2}' /proc/meminfo)
+if [ "\$TOTAL_MEM_KB" -gt 128000000 ]; then
+    echo "🚀 Ultra-High RAM detected (\${TOTAL_MEM_KB}KB), preparing 100GB host-side RAM disk..."
+    mkdir -p /root/chromium-mv2/out_ramdisk
+    if ! mountpoint -q /root/chromium-mv2/out_ramdisk; then
+        mount -t tmpfs -o size=100G tmpfs /root/chromium-mv2/out_ramdisk || echo "⚠️ Failed to mount host RAM disk."
+    fi
+fi
+
 echo "📦 Installing Docker + rclone (if missing)..."
 if ! command -v docker &>/dev/null; then
     apt-get update -qq && apt-get install -y -qq docker.io
