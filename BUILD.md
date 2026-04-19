@@ -1,65 +1,68 @@
-# Build & Maintenance Scripts
+# Chromium Build & Orchestration
 
-Shell scripts for remote builds, cross-compilation, toolchain packaging, and log monitoring.
+Modern, volume-aware build system for high-performance Chromium cross-compilation on Hetzner Cloud.
 
-## Build Scripts
+## Core Scripts
 
-### [build-nix-on-hetzner.sh](./build-nix-on-hetzner.sh)
+### [build-hetzner.sh](./build-hetzner.sh)
 
-Builds Chromium in a "nix way" on a remote Hetzner cloud server and pushes the result to Cachix.
+The master orchestrator. It manages the full lifecycle: server creation, volume mounting, source syncing, and platform handoff.
 
-- **Usage:** `./build-nix-on-hetzner.sh <HETZNER_IP> <CACHIX_TOKEN> [HETZNER_API_TOKEN]`
-- **Note:** If an API token is provided, the server will self-destruct after a successful build.
-- **Critical:** Ensure all local patches are committed and pushed to GitHub before running, as the remote server builds from the GitHub repository.
-
-### [build-binaries-on-hetzner.sh](./build-binaries-on-hetzner.sh)
-
-Builds both Linux (.deb) and Windows (.exe) binaries on a remote Hetzner cloud server using Docker. This script uses snapshots for persistence.
-
-- **Usage:** `./build-binaries-on-hetzner.sh <HETZNER_IP> <CHROMIUM_VERSION> [--from-cache <PREV_VERSION>] [--api <TOKEN>]`
-- **Features:**
-  - Produces both a Debian package (`.deb`) and a Windows installer (`.exe`).
-  - Uploads both artifacts to Google Drive upon success.
-  - Creates a Hetzner snapshot of the server disk to preserve the ~30 GB source tree for the next build.
-  - Automatically deletes the server after the snapshot is finished.
-- **Note:** Snapshotting is significantly faster than archiving and uploading the source tree to Google Drive.
+- **Usage:** `./build-hetzner.sh <VERSION> --target <deb|win> --api-key <TOKEN> [options]`
+- **Key Options:**
+  - `--cheap`: Use a `cx23` (4-core) for both Manager and Beast. Ideal for testing.
+  - `--skip-sync`: Bypass the Manager and launch the Beast immediately on an existing volume.
+  - `--reuse-beast <IP>`: **Rescue Mode**. Repairs and resumes a build on an existing server.
+  - `--remove-volume`: Deletes the persistent volume and the server upon success.
+- **The "Universal Volume" Strategy:**
+  The Seed server always prepares the volume for both Linux and Windows. This allows you to build a Linux package, then immediately build a Windows installer on the same server without re-downloading toolchains.
 
 ### [build-docker.sh](./build-docker.sh)
 
-Builds Chromium for both Linux (Debian) and Windows using a Docker or Podman container.
+The build engine. Runs inside a Docker container to provide a reproducible build environment.
 
-- **Usage:** `./build-docker.sh <CHROMIUM_VERSION> [--shallow]`
-- **Output:** Produces both a `chromium-browser_*.deb` (Linux) and a `mini_installer.exe` (Windows).
-- **Persistence:** Uses a Docker volume (`chromium-mv2-src`) to persist the source tree and enable incremental builds.
-
-### [build-win-on-hetzner.sh](./build-win-on-hetzner.sh)
-
-Automates the Windows Chromium build on a Hetzner server, utilizing Google Drive for toolchain and artifact storage.
-
-- **Usage:** `./build-win-on-hetzner.sh <HETZNER_IP> <CHROMIUM_VERSION> [--from-cache <PREV_VERSION>] [--api <TOKEN>]`
 - **Features:**
-  - `--from-cache`: Downloads previous build artifacts from Google Drive to allow incremental compilation.
-  - `--api`: Provides a Hetzner API token to trigger automatic server self-destruction upon completion.
-- **Prerequisites:** Requires `rclone` configured with a remote pointing to Google Drive.
-
-## Monitoring
+  - **Self-Healing:** Automatically detects if the target changed and repairs toolchains.
+  - **Smart Sync:** Skips the 110GB sync if run inside the cloud orchestrator.
+  - **Resource Aware:** Automatically caps Ninja jobs based on available RAM to prevent OOM kills.
+  - **Case-Insensitive:** Uses `ciopfs` to handle Windows headers on Linux filesystems.
 
 ### [tail-hetzner.sh](./tail-hetzner.sh)
 
-Streams build logs from a remote Hetzner server.
+The monitoring tool. Automatically discovers active build servers and streams their logs.
 
-- **Usage:** `./tail-hetzner.sh <HETZNER_IP>`
-- **Features:** Includes SSH keepalives every 60 s and an idle timeout (60 min) to prevent disconnection during long, silent build steps (e.g. the final link or a large git clone). Automatically detects a stalled/crashed build and restarts it; pressing Ctrl+C exits without killing the background build.
+- **Usage:** `./tail-hetzner.sh` (Auto-detects IP)
+- **Features:** Surrvives server handoffs and rescues. Streams `/var/log/build.log` with high-resolution timestamps.
 
-## Toolchain Packaging
+---
 
-### [do_package.sh](./tools/do_package.sh)
+## Build Workflows
 
-Entry-point script run **inside** the `build-docker.sh` container to package the Windows VS 2022 toolchain into a `<sha1>.zip` archive.
+### 1. The Integrated Production Run
 
-- **What it does:**
-  1. Installs `ciopfs` (case-insensitive overlay FS).
-  2. Mounts `/real_c` (the Windows C: drive bind-mount) as a case-insensitive filesystem at `/windrive`.
-  3. Changes into `/out` and invokes `tools/run_packager.py` to produce the zip.
-- **Not run directly** — called by `build-docker.sh` automatically.
-- See [`tools/README.md`](./tools/README.md) for details on `run_packager.py`.
+To build both platforms with maximum efficiency:
+
+```bash
+# Step A: Build Linux (Creates the Universal Volume)
+./build-hetzner.sh 147.0.7727.101 --target deb --api-key $HCLOUD_TOKEN --gh-token $GH_TOKEN
+
+# Step B: Build Windows (Reuses the same server and volume)
+./build-hetzner.sh 147.0.7727.102 --target win --api-key $HCLOUD_TOKEN --reuse-beast <BEAST_IP> --remove-volume
+```
+
+### 2. The Cheap Test
+
+To verify code changes without spending money:
+
+```bash
+./build-hetzner.sh 147.0.7727.103 --target deb --api-key $HCLOUD_TOKEN --cheap
+```
+
+---
+
+## Architecture
+
+1.  **Manager (Seed):** A cheap `cx23` server. It mounts the persistent volume, syncs the 110GB source, and downloads the "Universal" toolchains.
+2.  **Handoff:** The Manager flushes data to the Volume, detaches it, and spawns the Beast.
+3.  **Beast:** A powerful `ccx63` (48-core) server. It mounts the volume and starts the heavy compilation immediately.
+4.  **Persistence:** All source code and build artifacts live on a **Hetzner Volume**, ensuring that a server crash never loses your progress.

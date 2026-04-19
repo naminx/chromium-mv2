@@ -6,4 +6,5 @@ result-*
 .direnv/
 .openclaude-profile.*
 mini_installer-*.exe
+chromium-browser-*.deb
 packager_output.log

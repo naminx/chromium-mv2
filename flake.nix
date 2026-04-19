@@ -21,6 +21,7 @@
         packages = [
           pkgs.bash
           pkgs.coreutils
+          pkgs.hcloud
         ];
         shellHook = ''
           echo "🐳 Build shell ready. Run: ./build-docker.sh <CHROMIUM_VERSION>"

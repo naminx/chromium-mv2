@@ -1,0 +1,8 @@
+#!/bin/bash
+if [ "$1" = "ssh-key" ]; then echo '[{"id": 123}]'; exit 0; fi
+if [ "$1" = "volume" ] && [ "$2" = "describe" ]; then echo '{"id": 456, "server": null}'; exit 0; fi
+if [ "$1" = "server" ] && [ "$2" = "list" ]; then echo '[]'; exit 0; fi
+if [ "$1" = "server" ] && [ "$2" = "create" ]; then echo '{"server": {"public_net": {"ipv4": {"ip": "1.2.3.4"}}}}'; exit 0; fi
+if [ "$1" = "server" ] && [ "$2" = "describe" ]; then echo '{"public_net": {"ipv4": {"ip": "1.2.3.4"}}}'; exit 0; fi
+echo "MOCK: hcloud $@" >&2
+exit 0

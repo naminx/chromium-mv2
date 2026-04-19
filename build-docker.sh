@@ -66,7 +66,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 IMAGE_NAME="chromium-mv2-builder-v12"
-VOLUME_NAME="chromium-mv2-src"
+VOLUME_NAME="${VOLUME_NAME:-chromium-mv2-src}"
 
 # Prefer docker (already installed); fall back to podman.
 if command -v docker &>/dev/null; then
@@ -93,7 +93,7 @@ LABEL description="Chromium incremental build environment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
-    fuse ciopfs unzip p7zip-full pkg-config binutils rpm dpkg-dev patch gperf git-restore-mtime \
+    fuse libfuse2 ciopfs unzip p7zip-full pkg-config binutils rpm dpkg-dev patch gperf git-restore-mtime \
     devscripts fakeroot \
     && rm -rf /var/lib/apt/lists/*
 
@@ -148,6 +148,9 @@ $DOCKER run --rm -i \
     -e "DEPOT_TOOLS_UPDATE=1" \
     -e "DEPOT_TOOLS_METRICS=0" \
     -e "GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1" \
+    -e "SKIP_GCLIENT_SYNC=${SKIP_GCLIENT_SYNC}" \
+    -e "VPYTHON_VENV_ROOT=${VPYTHON_VENV_ROOT}" \
+    -e "PIP_CACHE_DIR=${PIP_CACHE_DIR}" \
     "$IMAGE_NAME" bash << 'INNER'
 set -e
 
@@ -176,8 +179,8 @@ TOOLCHAIN_DEST="$TOOLCHAIN_ROOT/vs_files/$HASH"
 
 if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
     # If we have lots of RAM, use tmpfs for the toolchain to speed up extraction
-    TOTAL_MEM=$(awk '/MemTotal/{print $2}' /proc/meminfo)
-    if [ "$TOTAL_MEM_GB" -gt 64000000 ] && ! mountpoint -q "$TOOLCHAIN_ROOT"; then
+    TOTAL_MEM_KB=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+    if [ "$TOTAL_MEM_KB" -gt 64000000 ] && ! mountpoint -q "$TOOLCHAIN_ROOT"; then
         echo "🚀 High RAM detected, mounting 10GB tmpfs for toolchain..."
         mkdir -p "$TOOLCHAIN_ROOT"
         mount -t tmpfs -o size=10G tmpfs "$TOOLCHAIN_ROOT" || echo "⚠️  Failed to mount tmpfs."
@@ -200,7 +203,7 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
             curl -L -o "$TOOLCHAIN_ARCHIVE" "https://github.com/naminx/chromium-toolchain/releases/download/v1.0.0.42b5b0689e/42b5b0689e.7z"
         fi
         echo "📂 Extracting 7z toolchain (with password)..."
-        7z x -p"$TOOLCHAIN_PASS" "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
+        7z x -p42b5b0689e "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
         echo "✅ Extraction complete."
     fi
 
@@ -222,7 +225,48 @@ fi
 #   _bad_scm/               — gclient's own failed-recovery debris
 # These silently fill the disk so every subsequent retry hits the same
 # "No space left on device" error and the volume never recovers.
-echo "🧹 Finding and quietly trashing any corrupted component repos..."
+# ── Helper: Write win_toolchain.json (must exist BEFORE gclient runhooks) ──────
+# vs_toolchain.py checks for this file. If it matches version '2022',
+# ShouldUpdateToolchain() returns False → no download is attempted.
+write_toolchain_json() {
+    mkdir -p build
+    NEW=$(cat <<'TCEOF'
+{
+  "path": "TOOLCHAIN_DEST_PLACEHOLDER",
+  "version": "42b5b0689e",
+  "win_sdk": "TOOLCHAIN_DEST_PLACEHOLDER/Windows Kits/10",
+  "wdk": "TOOLCHAIN_DEST_PLACEHOLDER/wdk",
+  "runtime_dirs": [
+    "TOOLCHAIN_DEST_PLACEHOLDER/sys64",
+    "TOOLCHAIN_DEST_PLACEHOLDER/sys32",
+    "TOOLCHAIN_DEST_PLACEHOLDER/sysarm64"
+  ]
+}
+TCEOF
+)
+    NEW=$(echo "$NEW" | sed "s|TOOLCHAIN_DEST_PLACEHOLDER|$TOOLCHAIN_DEST|g")
+    EXISTING=$(cat build/win_toolchain.json 2>/dev/null || true)
+    if [ "$NEW" != "$EXISTING" ]; then
+        echo "$NEW" > build/win_toolchain.json
+        echo "✅ win_toolchain.json updated."
+    else
+        echo "✅ win_toolchain.json unchanged (skipping write)."
+    fi
+}
+
+# ── Sync/update the source tree ──────────────────────────────────────────────
+echo "🔍 [DEBUG] Identity: $([ -f /.dockerenv ] && echo "DOCKER" || echo "HOST") | PWD: $(pwd) | SKIP_SYNC: $SKIP_GCLIENT_SYNC"
+
+if [ "$SKIP_GCLIENT_SYNC" = "1" ]; then
+    echo "⏭️  [DOCKER] SKIP_GCLIENT_SYNC is set. Bypassing internal sync logic..."
+else
+    if [ -f /.dockerenv ]; then
+        echo "❌ FATAL ERROR: Attempted to run 100GB sync INSIDE a Docker container!"
+        echo "   This process would crash the server. Aborting sync immediately."
+        exit 1
+    fi
+    echo "📥 [HOST] Starting Chromium source sync..."
+    echo "🧹 Finding and quietly trashing any corrupted component repos..."
 find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
     echo "   🗑️  Sweeping corrupted component to background trash: $d"
     PARENT_DIR="$(dirname "$d")"
@@ -334,39 +378,7 @@ fi
 
 cd src
 
-# ── Write win_toolchain.json (must exist BEFORE gclient runhooks) ─────────────
-# vs_toolchain.py checks for this file. If it matches version '2022',
-# ShouldUpdateToolchain() returns False → no download is attempted.
-# Written as a function so we can call it again after gclient sync (which may
-# recreate the build/ directory or clobber the file).
-write_toolchain_json() {
-    mkdir -p build
-    # Generate desired content first, then only overwrite if it changed.
-    # Avoiding mtime bumps prevents GN from treating the toolchain as modified.
-    NEW=$(cat <<'TCEOF'
-{
-  "path": "TOOLCHAIN_DEST_PLACEHOLDER",
-  "version": "42b5b0689e",
-  "win_sdk": "TOOLCHAIN_DEST_PLACEHOLDER/Windows Kits/10",
-  "wdk": "TOOLCHAIN_DEST_PLACEHOLDER/wdk",
-  "runtime_dirs": [
-    "TOOLCHAIN_DEST_PLACEHOLDER/sys64",
-    "TOOLCHAIN_DEST_PLACEHOLDER/sys32",
-    "TOOLCHAIN_DEST_PLACEHOLDER/sysarm64"
-  ]
-}
-TCEOF
-)
-    NEW=$(echo "$NEW" | sed "s|TOOLCHAIN_DEST_PLACEHOLDER|$TOOLCHAIN_DEST|g")
-    EXISTING=$(cat build/win_toolchain.json 2>/dev/null || true)
-    if [ "$NEW" != "$EXISTING" ]; then
-        echo "$NEW" > build/win_toolchain.json
-        echo "✅ win_toolchain.json updated."
-    else
-        echo "✅ win_toolchain.json unchanged (skipping write)."
-    fi
-}
-
+# ── Setup Environment for Windows builds ────────────────────────────────────
 if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
     export GYP_MSVS_OVERRIDE_PATH="$TOOLCHAIN_DEST"
     export WINDOWSSDKDIR="$TOOLCHAIN_DEST/Windows Kits/10"
@@ -460,7 +472,19 @@ else
         --delete_unversioned_trees
 fi
 
-echo "✅ Source synced to $CHROMIUM_VERSION"
+    echo "✅ Source synced to $CHROMIUM_VERSION"
+fi
+
+echo "🔍 [DEBUG] Pre-CD Check: $(pwd) | Content: $(ls -m)"
+cd src || { echo "❌ ERROR: Could not enter 'src' directory. Current dir: $(pwd)"; ls -F; exit 1; }
+
+# ── Prepare clean state for patching ────────────────────────────────────────
+# Revert any previously applied patches to avoid "Reversed patch" errors.
+echo "🧹 Resetting source tree to clean state..."
+git reset --hard HEAD 2>/dev/null || true
+git clean -fd 2>/dev/null || true
+
+echo "🔍 [DEBUG] Post-CD Check: $(pwd) | Content: $(ls -m | head -c 100)..."
 
 # Force Chromium to accept our customized mounted Windows toolchain by rewriting its expectations
 if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
@@ -473,27 +497,75 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
     write_toolchain_json
 fi
 
+# ── Ensure .gclient is configured for the current target ─────────────────────
+# For Windows cross-compile, we MUST have "target_os": ["win"] in .gclient
+GCLIENT_FILE="/chromium/.gclient"
+if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    if ! grep -q '"win"' "$GCLIENT_FILE" 2>/dev/null; then
+        echo "📝 Configuring .gclient for Windows cross-compile..."
+        cat > "$GCLIENT_FILE" << 'EOF'
+solutions = [
+    {
+        "name": "src",
+        "url": "https://chromium.googlesource.com/chromium/src.git",
+        "managed": False,
+        "custom_deps": {},
+        "custom_vars": {},
+    },
+]
+target_os = ["win", "linux"]
+EOF
+        FORCE_HOOKS=1
+    fi
+fi
+
 # ── Install / update Linux host build dependencies ───────────────────────────
 # These are the *host* tools needed to run the cross-compiler itself.
 # IMPORTANT: sentinel is on the PERSISTENT VOLUME (/chromium), not /tmp.
-# /tmp is a tmpfs cleared on every host reboot; using it caused gclient runhooks
-# to re-fire after reboot, touching timestamps and triggering a full recompile.
-if [ ! -f /chromium/.deps_installed ]; then
-    echo ""
-    echo "📦 Installing Linux host build dependencies (first run only)..."
-    ./build/install-build-deps.sh --no-prompt --no-chromeos-fonts --no-arm
-    touch /chromium/.deps_installed
-    # Hooks set up the Windows cross-toolchain (clang, lld, rc.exe etc.).
-    # DEPOT_TOOLS_WIN_TOOLCHAIN=0: makes 'vs_toolchain.py update --force' return
-    # 0 without touching GCS. All other hooks (clang, etc.) are unaffected.
-    gclient runhooks
+LAST_TARGET_FILE="/chromium/.last_target"
+[ -f "$LAST_TARGET_FILE" ] && LAST_TARGET=$(cat "$LAST_TARGET_FILE") || LAST_TARGET=""
+
+FORCE_HOOKS=0
+if [ "$LAST_TARGET" != "$BUILD_TARGET" ]; then
+    # If the last target was 'all', it is compatible with both 'win' and 'deb'
+    if [ "$LAST_TARGET" = "all" ]; then
+        echo "✅ Volume is Universal (all). Skipping toolchain re-sync for $BUILD_TARGET."
+    else
+        echo "🔄 Target changed ($LAST_TARGET → $BUILD_TARGET) — updating toolchains..."
+        FORCE_HOOKS=1
+    fi
+    # Always update the tracker to the most specific request
+    echo "$BUILD_TARGET" > "$LAST_TARGET_FILE"
 fi
 
-# Switch to =1 now: gn gen calls 'vs_toolchain.py get_toolchain_dir' which
-# needs GetVisualStudioVersion() to return '2022'. With json in place and
-# version matching, ShouldUpdateToolchain() returns False → no download.
-export DEPOT_TOOLS_WIN_TOOLCHAIN=1
-# Ensure JSON is still current (runhooks may have clobbered it)
+if [ ! -f /chromium/.deps_installed ] || [ "$FORCE_HOOKS" = "1" ]; then
+    if [ ! -f /chromium/.deps_installed ]; then
+        echo ""
+        echo "📦 Installing Linux host build dependencies (first run only)..."
+        ./build/install-build-deps.sh --no-prompt --no-chromeos-fonts --no-arm
+        touch /chromium/.deps_installed
+    fi
+    # DEPOT_TOOLS_WIN_TOOLCHAIN=0 is MANDATORY here. 
+    # It prevents 'gclient runhooks' from trying to download the official 
+    # Windows SDK from Google's private storage (which causes the 401 error).
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+    echo "🛠️  Running gclient hooks (Native tools)..."
+    gclient runhooks
+    
+    # We manually update Clang to ensure we have the Windows cross-compile libs
+    echo "🔧 Updating Clang toolchain (Universal)..."
+    python3 tools/clang/scripts/update.py
+fi
+
+# We only enable the Windows toolchain flag AFTER the hooks are done.
+# This allows 'gn gen' to see our local toolchain without triggering a download.
+if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=1
+else
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+fi
+
+# Ensure JSON is still current
 write_toolchain_json
 
 # ── Apply custom patches ──────────────────────────────────────────────────────
@@ -547,8 +619,6 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
     [ "$CONCURRENT_LINKS" -gt 8 ] && CONCURRENT_LINKS=8 # Diminishing returns after 8
 
     echo ""
-    echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
-
     GN_ARGS_LINUX="
         target_os = \"linux\"
         is_debug = false
@@ -557,12 +627,35 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
         symbol_level = 0
         blink_symbol_level = 0
         v8_symbol_level = 0
-        enable_nacl = false
         proprietary_codecs = true
         ffmpeg_branding = \"Chrome\"
     "
-    gn gen out/linux --args="$GN_ARGS_LINUX"
 
+    # Intelligently re-run gn gen if arguments changed or ninja file is missing.
+    # We compare the current GN_ARGS with the existing args.gn to avoid "ghost" warnings.
+    RECONFIGURE=0
+    if [ ! -f out/linux/build.ninja ] || [ ! -f out/linux/args.gn ]; then
+        RECONFIGURE=1
+    else
+        # Normalize whitespace and compare
+        CURRENT_ARGS_NORM=$(echo "$GN_ARGS_LINUX" | tr -d '[:space:]')
+        EXISTING_ARGS_NORM=$(cat out/linux/args.gn | tr -d '[:space:]' | sed 's/import.*//')
+        [ "$CURRENT_ARGS_NORM" != "$EXISTING_ARGS_NORM" ] && RECONFIGURE=1
+    fi
+
+    if [ "$RECONFIGURE" = "1" ]; then
+        echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
+        # Temporary fix: chrome_management_service fails to link in official builds
+        git checkout chrome/installer/linux/BUILD.gn 2>/dev/null || true
+        sed -i 's|.*root_out_dir/chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
+        sed -i '/strip_binary("strip_chrome_management_service") {/,/}/ s/^/# /' chrome/installer/linux/BUILD.gn
+        sed -i 's|.*:strip_chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
+        sed -i 's|.*//chrome/browser/enterprise/connectors/device_trust/key_management/installer/management_service:chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
+
+        gn gen out/linux --args="$GN_ARGS_LINUX"
+    else
+        echo "⏭️  Configuration up-to-date. Skipping gn gen..."
+    fi
     echo "🔍 Validating Linux build targets..."
     if ! ninja -C out/linux -n chrome chrome_sandbox chrome/installer/linux:stable >/dev/null 2>&1; then
         echo "❌ ERROR: One or more Ninja targets are invalid for this version of Chromium."
@@ -601,27 +694,43 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
         symbol_level = 0
         blink_symbol_level = 0
         v8_symbol_level = 0
-        enable_nacl = false
         proprietary_codecs = true
         ffmpeg_branding = \"Chrome\"
     "
     # Always run gn gen — it is idempotent and takes ~5s. The previous conditional
     # used a fragile whitespace comparison that always triggered a re-run anyway,
     # and the re-run could confuse ninja's dependency tracking.
-    echo "⚙️  Configuring build (gn gen)..."
-    gn gen out/win --args="$GN_ARGS"
+    # Intelligently re-run gn gen if arguments changed or ninja file is missing.
+    RECONFIGURE=0
+    if [ ! -f out/win/build.ninja ] || [ ! -f out/win/args.gn ]; then
+        RECONFIGURE=1
+    else
+        # Normalize whitespace and compare
+        CURRENT_ARGS_NORM=$(echo "$GN_ARGS" | tr -d '[:space:]')
+        EXISTING_ARGS_NORM=$(cat out/win/args.gn | tr -d '[:space:]' | sed 's/import.*//')
+        [ "$CURRENT_ARGS_NORM" != "$EXISTING_ARGS_NORM" ] && RECONFIGURE=1
+    fi
+
+    if [ "$RECONFIGURE" = "1" ]; then
+        echo "⚙️  Configuring Windows build (gn gen)..."
+        gn gen out/win --args="$GN_ARGS"
+    else
+        echo "⏭️  Configuration up-to-date. Skipping gn gen..."
+    fi
+
+    # Ensure output directory exists for version tracking
+    mkdir -p out/win
 
     echo "🔍 Validating Windows build targets..."
-    if ! ninja -C out/win -n mini_installer.exe >/dev/null 2>&1; then
-        echo "❌ ERROR: Ninja target 'mini_installer.exe' is invalid for this version of Chromium."
+    if ! ninja -C out/win -n mini_installer; then
+        echo "❌ ERROR: Ninja target 'mini_installer' is invalid for this version of Chromium."
         exit 1
     fi
 
-    # If the version changed, delete mini_installer.exe to force a relink.
-    # (An OOM-killed mid-build leaves the previous version's .exe which ninja
-    # otherwise considers up-to-date and never retouches.)
-    # PREV_VERSION was read near the top of this script now that VERSION_FILE
-    # is defined early — no need to re-read it here.
+    # VERSION_FILE tracks the last successfully built version to trigger relinks
+    VERSION_FILE="out/win/.last_built_version"
+    [ -f "$VERSION_FILE" ] && PREV_VERSION=$(cat "$VERSION_FILE") || PREV_VERSION=""
+
     if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
         echo "Version changed ($PREV_VERSION → $CHROMIUM_VERSION) — forcing relink."
         rm -f out/win/mini_installer.exe out/win/mini_installer.exe.pdb
@@ -639,11 +748,10 @@ if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
     echo "   CPUs: $CPU_COUNT  |  RAM: ${TOTAL_MEM_GB}GB  |  ninja -j${NINJA_JOBS}"
 
     echo ""
-    echo "Building mini_installer.exe (incremental)..."
+    echo "Building mini_installer (incremental)..."
 
-    # Use the explicit filename target so ninja is forced to rebuild the real file,
-    # not satisfy a phony alias that might incorrectly report 'up to date'.
-    ninja -C out/win mini_installer.exe -j${NINJA_JOBS}
+    # Use the base target name for reliable phony resolution
+    ninja -C out/win mini_installer -j${NINJA_JOBS}
 
     if [ ! -f out/win/mini_installer.exe ]; then
         echo "❌ ERROR: ninja succeeded but mini_installer.exe was not produced!"
