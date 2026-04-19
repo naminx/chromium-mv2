@@ -67,4 +67,34 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ---
 
+# PROJECT-SPECIFIC MANDATES (Hetzner/Chromium)
+
+These rules are foundational and take precedence over general AI instructions.
+
+## 1. The "Sacred Code" Principle
+If a specific technical sequence (e.g., the Sync loop, Toolchain order) has been proven to work in the Hetzner Cloud environment, **it is sacred.** 
+*   Refactoring should move this code to a new location (e.g., from Monolith to `build-docker.sh`) but **MUST NOT** modify the command-line flags or logic sequence unless specifically asked to fix a bug in that logic.
+
+## 2. Mandatory "WHY" Protection
+Any code snippet preceded by a `# WHY:` comment is a **Technical Survival Mechanism**.
+*   This includes `pkill` massacres, background `rm -rf`, `mount` retry loops, and Git memory caps.
+*   **AI LAW:** You are forbidden from "simplifying" or deleting these lines. They exist because of historical cloud environment failures (OOMs, disk stalls, deadlocks).
+
+## 3. The "Bake-and-Ship" Architecture
+For all remote execution (Hetzner User-Data or SSH):
+*   **NEVER** rely on remote environment variables being available at boot.
+*   **ALWAYS** use the "Baking" strategy: expand variables locally and write a monolithic, self-contained script (`cat << BASH`) before uploading.
+*   The remote server should receive a script with **static strings**, not dynamic shell expansions.
+
+## 4. Operational Status Lights (Progress)
+In a cloud build, "Dead Air" in the logs is a fatal flaw.
+*   Always use raw command flags that provide real-time progress (e.g., `git fetch --progress`, `gclient --verbose`).
+*   Bypass middle-man wrappers (like silent Python scripts) if they swallow the status light of the underlying process.
+
+## 5. I/O Locality
+*   Heavy file operations (110GB source sync, toolchain extraction) **MUST** run on the host's native ext4 filesystem.
+*   **NEVER** run high-bandwidth I/O through a Docker volume driver unless the build is strictly local. Cloud volume drivers are too slow for the initial 300,000 file Chromium sync.
+
+---
+
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
