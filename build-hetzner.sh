@@ -105,8 +105,16 @@ export VOL_ID="${CURRENT_VOL_ID}"; export VOLUME_NAME="${VOLUME_NAME}"
 exec > /var/log/build.log 2>&1
 echo "📦 Initializing System..."
 apt-get update && apt-get install -y curl jq git python3 psmisc moreutils software-properties-common libfuse2
+
+# Install CLI tools (Required for handoff and release)
 if ! command -v hcloud &>/dev/null; then
     curl -fsSL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar -xz -C /usr/local/bin hcloud
+fi
+if ! command -v gh &>/dev/null; then
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    apt-get update && apt-get install -y gh
 fi
 exec > >(ts '[%Y-%m-%d %H:%M:%S]' > /var/log/build.log) 2>&1
 echo "--- Build Script Started (\$(hostname)) ---"
@@ -183,7 +191,12 @@ else
         FILES=\$(ls *.deb *.exe 2>/dev/null || true)
         [ -n "\$FILES" ] && (gh release upload "v\$VERSION" \$FILES --clobber || gh release create "v\$VERSION" \$FILES)
     fi
-    if [ "$KEEP_VOLUME" = "false" ]; then hcloud volume delete "$VOLUME_NAME"; fi
+    # Final Cleanup
+    if [ "$KEEP_VOLUME" = "false" ]; then
+        cd / && umount /mnt/chromium/out_ramdisk || true && umount /mnt/chromium/src/out || true && umount /mnt/chromium
+        hcloud volume detach "$VOLUME_NAME"; until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "null" ]; do sleep 2; done
+        hcloud volume delete "$VOLUME_NAME"
+    fi
     hcloud server delete \$(hostname)
 fi
 BASH
@@ -206,14 +219,20 @@ if [ -n "$REUSE_BEAST_IP" ]; then
     echo "🔗 Verifying volume attachment..."
     CUR_VOL=$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r '.server // "null"')
     if [ "$CUR_VOL" != "$BEAST_ID_REUSE" ]; then
+        echo "  -> Attaching volume to $BEAST_NAME_REUSE..."
         hcloud volume detach "$VOLUME_NAME" 2>/dev/null || true
         until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "null" ]; do sleep 2; done
         hcloud volume attach "$VOLUME_NAME" --server "$BEAST_NAME_REUSE"
         until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "$BEAST_ID_REUSE" ]; do sleep 2; done
+        ssh -o StrictHostKeyChecking=no root@$REUSE_BEAST_IP "umount -l /mnt/chromium || true"
     fi
 
+    generate_monolith_script "false" > /tmp/monolith_beast.sh
     scp -o StrictHostKeyChecking=no -qr /tmp/monolith_beast.sh build-docker.sh patches root@$REUSE_BEAST_IP:/tmp/
+    
+    # THE PROCESS MASSACRE (WHY): Terminate lingering build-related tasks.
     ssh -o StrictHostKeyChecking=no root@$REUSE_BEAST_IP "fuser -k /var/log/build.log || true; pkill -9 -f monolith || true; pkill -9 -f build-docker || true; pkill -9 -f gclient || true; pkill -9 -f vpython || true; pkill -9 -f git || true; pkill -9 -u root bash || true; rm -f /var/log/build.log" || true
+    
     ssh -o StrictHostKeyChecking=no root@$REUSE_BEAST_IP "bash /tmp/monolith_beast.sh" > /dev/null 2>&1 &
     exit 0
 fi
@@ -231,15 +250,20 @@ if [ -n "$REUSE_SEED_IP" ]; then
     echo "🔗 Verifying volume attachment..."
     CUR_VOL=$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r '.server // "null"')
     if [ "$CUR_VOL" != "$SEED_ID_REUSE" ]; then
+        echo "  -> Attaching volume to $SEED_NAME_REUSE..."
         hcloud volume detach "$VOLUME_NAME" 2>/dev/null || true
         until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "null" ]; do sleep 2; done
         hcloud volume attach "$VOLUME_NAME" --server "$SEED_NAME_REUSE"
         until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "$SEED_ID_REUSE" ]; do sleep 2; done
+        ssh -o StrictHostKeyChecking=no root@$REUSE_SEED_IP "umount -l /mnt/chromium || true"
     fi
 
     generate_monolith_script "true" > /tmp/monolith_manager.sh
     scp -o StrictHostKeyChecking=no -qr /tmp/monolith_manager.sh /tmp/monolith_beast.sh build-docker.sh patches root@$REUSE_SEED_IP:/tmp/
+    
+    # THE PROCESS MASSACRE (WHY): Terminate lingering build-related tasks.
     ssh -o StrictHostKeyChecking=no root@$REUSE_SEED_IP "fuser -k /var/log/build.log || true; pkill -9 -f monolith || true; pkill -9 -f build-docker || true; pkill -9 -f gclient || true; pkill -9 -f vpython || true; pkill -9 -f git || true; pkill -9 -u root bash || true; rm -f /var/log/build.log" || true
+    
     ssh -o StrictHostKeyChecking=no root@$REUSE_SEED_IP "bash /tmp/monolith_manager.sh" > /dev/null 2>&1 &
     exit 0
 fi

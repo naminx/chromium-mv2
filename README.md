@@ -1,159 +1,101 @@
-# chromium-mv2
+# Chromium MV2
 
-A customized NixOS build of Chromium with extra patches, automatically built and published to Cachix.
+A specialized Chromium build pipeline designed for high-performance cross-compilation on Hetzner Cloud and local NixOS machines. This project focuses on maintaining Manifest V2 support and other custom patches.
 
-## Patches
+## The Modern Build Architecture
 
-Custom patches live in the `patches/` directory:
+The project is refactored into a "Single Source of Truth" architecture:
+
+1.  **The Brain (`build-docker.sh`):** Contains 100% of the Chromium intelligence. It handles synchronization, toolchain preparation, patching, and Ninja compilation. It is a two-phase state machine that runs natively on the host for speed (Sync/Toolchains) and inside Docker for reproducibility (Compilation).
+2.  **The Body (`build-hetzner.sh`):** A pure infrastructure orchestrator. It manages the Hetzner server lifecycle, volume mounting, and server-to-server handoffs. It has no internal knowledge of Chromium.
+
+---
+
+## 🔐 Environment Setup
+
+Authentication is handled via standard environment variables. You must set these before running any build scripts:
+
+```bash
+export HCLOUD_TOKEN="your_hetzner_api_token"
+export GITHUB_TOKEN="your_github_token"   # Required for releases and --remove-volume
+```
+
+---
+
+## 🚀 Cloud Build Workflows (Hetzner)
+
+### 1. The Integrated Production Run
+This perform the 110GB sync on a cheap "Manager" node, then hands off the volume to a 48-core "Beast" for compilation.
+
+```bash
+# Target options: deb, win, or all
+./build-hetzner.sh 147.0.7727.101 --target all
+```
+
+### 2. The "Domestic Cat" (Cheap Test)
+Verifies the entire pipeline (Sync + Compilation) using only cheap `cx23` servers.
+
+```bash
+./build-hetzner.sh 147.0.7727.101 --target deb --cheap
+```
+
+### 3. Monitoring Progress
+Use the tail script to stream logs from the active server. It automatically discovers the correct IP.
+
+```bash
+./tail-hetzner.sh
+```
+
+### 4. Nuclear Cleanup
+Deletes ALL build servers and the persistent volume associated with the project.
+
+```bash
+./build-hetzner.sh --cleanup
+```
+
+---
+
+## 💻 Local Build Workflow
+
+The "Brain" script is designed to be fully functional on your local NixOS or Linux machine.
+
+```bash
+# Syncs code locally and builds inside a Docker container
+./build-docker.sh 147.0.7727.101 --target all
+```
+
+---
+
+## 🩹 Patches
+
+Custom patches live in the `patches/` directory. They are applied automatically during the build phase.
 
 | Patch                    | Description                                                                 |
 | ------------------------ | --------------------------------------------------------------------------- |
 | `keep-window-open.patch` | Creates a new tab instead of closing the window when the last tab is closed |
+| `manifest-v2.patch`      | Restores Manifest V2 support in newer Chromium versions                     |
+| `google-sync.patch`      | Enables custom Google Sync API keys                                         |
 
-## Project Layout
+---
+
+## 📂 Project Layout
 
 ```
 .
-├── default.nix                     # Top-level Nix expression — builds Chromium
-├── flake.nix / flake.lock          # Nix flake for dev shell
-├── fetch-nixpkgs                   # Fetches nixpkgs sparse checkout into ./nixpkgs/
-├── patch-nixpkgs                   # Injects custom patches into nixpkgs (idempotent)
-├── patches/                        # Custom .patch files applied on top of stock Chromium
-│
-├── BUILD.md                        # Docs for all build/maintenance shell scripts
-├── build-nix-on-hetzner.sh         # Build Chromium on a remote Hetzner server (Nix)
-├── build-binaries-on-hetzner.sh    # Build Debian + Windows binaries on Hetzner (Snapshot)
-├── build-docker.sh                 # Cross-compile Chromium for Linux (.deb) + Windows (.exe) via Docker
-├── build-win-on-hetzner.sh         # Windows build on Hetzner with Drive caching
-├── tail-hetzner.sh                 # Stream & monitor remote build logs
-│
-├── linux_package_toolchain.py      # Upstream depot_tools packaging script (reference copy)
-├── package_from_installed.py       # Same as above — canonical depot_tools filename
-├── vs_toolchain.py                 # Upstream Chromium build/vs_toolchain.py (reference copy)
-│
-├── tools/                          # Linux-side wrappers to run the above on NixOS/Docker
-│   ├── host_packager.py            #   Package toolchain from locally-mounted Windows drive
-│   ├── run_packager.py             #   Package toolchain inside the Docker build container
-│   ├── do_package.sh               #   Package VS toolchain zip (runs inside Docker container)
-│   └── README.md                   #   Full docs for tools/ and upstream reference .py files
-│
-└── .github/
-    └── workflows/
-        └── build.yml               # GitHub Actions: build + push to Cachix
+├── build-docker.sh         # THE BRAIN: Sync, Toolchains, Compilation
+├── build-hetzner.sh        # THE BODY: Infrastructure orchestration
+├── tail-hetzner.sh         # THE LOGS: Real-time monitoring
+├── REFACTOR_PLAN.md        # Master architectural blueprint
+├── GEMINI.md               # Operational Laws (Historical Trauma protection)
+├── patches/                # Custom .patch files
+├── tools/                  # Toolchain packaging and VS helpers
+└── backups/                # Proven monolith backups
 ```
 
-## Local Build
+## 🛠️ Technical Safeguards (The "WHY")
 
-```bash
-# 1. Fetch a sparse nixpkgs checkout (only the Chromium package files)
-./fetch-nixpkgs
-
-# 2. Inject our custom patches into nixpkgs (idempotent)
-./patch-nixpkgs
-
-# 3. Build
-nix-build
-```
-
-The `result` symlink points to the built Chromium package.
-
-## Adding More Patches
-
-Simply drop a `.patch` file into the `patches/` directory. The `patch-nixpkgs` script
-automatically picks up **all** `*.patch` files in that directory and inserts them into
-`nixpkgs/.../chromium/common.nix`.
-
-Re-run `patch-nixpkgs` after adding a new patch (or re-run `fetch-nixpkgs && patch-nixpkgs`
-to start from a fresh nixpkgs checkout).
-
-## GitHub Actions / Cachix Setup
-
-The workflow (`.github/workflows/build.yml`) needs the following configured in your GitHub repository:
-
-### Repository Variables (`Settings → Secrets and variables → Actions → Variables`)
-
-| Name           | Value                                       |
-| -------------- | ------------------------------------------- |
-| `CACHIX_CACHE` | Your Cachix cache name (e.g. `my-chromium`) |
-
-### Repository Secrets (`Settings → Secrets and variables → Actions → Secrets`)
-
-| Name                | Value                                                           |
-| ------------------- | --------------------------------------------------------------- |
-| `CACHIX_AUTH_TOKEN` | Your Cachix auth token (from `cachix authtoken generate`)       |
-| `CACHIX_PUBLIC_KEY` | Your cache's public key (from `cachix use <cache-name>` output) |
-
-### Quick Cachix Setup
-
-```bash
-# Install cachix
-nix-env -iA cachix -f https://cachix.org/api/v1/install
-
-# Authenticate
-cachix authtoken <your-personal-token>
-
-# Create a cache (if you don't have one yet)
-cachix create my-chromium
-
-# Get your cache public key
-cachix use my-chromium
-```
-
-## Using the Cachix Binary in NixOS
-
-For Nix to fetch the pre-built binary from Cachix instead of compiling locally,
-the derivation hash computed on your machine must **exactly match** what CI built.
-This is guaranteed by `nixpkgs-pin.json`, which CI updates after each successful
-build to record the exact nixpkgs commit + sha256 it used.
-
-**Workflow on your local machine:**
-
-```bash
-# 1. Pull the repo (gets the latest nixpkgs-pin.json from CI)
-git -C ~/sources/chromium-mv2 pull
-
-# 2. Fetch nixpkgs sparse checkout + patch it
-bash ~/sources/chromium-mv2/fetch-nixpkgs
-bash ~/sources/chromium-mv2/patch-nixpkgs
-
-# 3. nixos-rebuild will now fetch from Cachix instead of compiling
-sudo nixos-rebuild switch
-```
-
-**`configuration.nix` snippet:**
-
-```nix
-{ config, pkgs, lib, ... }:
-
-let
-  # Import the custom Chromium — uses the exact same pinned nixpkgs as CI,
-  # so Cachix serves the pre-built binary instead of recompiling.
-  chromium-custom = import /home/namin/sources/chromium-mv2 { };
-in
-{
-  # Tell Nix to use your Cachix cache
-  nix.settings = {
-    substituters      = [ "https://namin.cachix.org" ];
-    trusted-public-keys = [ "namin.cachix.org-1:PASTE_PUBLIC_KEY_HERE" ];
-  };
-
-  environment.systemPackages = [ chromium-custom ];
-}
-```
-
-> **Why `nixpkgs-pin.json`?** If `default.nix` used `<nixpkgs>` (impure),
-> CI and your machine might evaluate against different nixpkgs channel snapshots,
-> producing different hashes — and Cachix would be a miss. The pin file locks
-> both to the identical commit, guaranteeing a cache hit.
-
-## Why Direct nixpkgs Patching?
-
-The standard NixOS `chromium` package does not support appending to `patches` via
-`overrideAttrs` because the patches list is deeply embedded in `common.nix` (it
-references local files via relative `./patches/` paths, which are not easily overridable).
-
-Our solution:
-
-1. Sparse-checkout _only_ the chromium package directory from nixpkgs
-2. Programmatically patch `common.nix` to append our custom patches
-3. Build using this locally modified nixpkgs
+Every technical routine in this project is protected by mandatory documentation in the code. Key safeguards include:
+*   **Background Trash GC:** Renames failed checkouts and deletes them in the background to allow instant retries.
+*   **Memory Resilience:** Early Swap activation and Git memory caps to survive on 4GB servers.
+*   **Incremental Intelligence:** `git diff` based timestamp restoration to save hours of compilation time.
+*   **Safe Toolchain Sequence:** Strict `WIN_TOOLCHAIN=0` lock during hooks to prevent unauthorized 401 errors.
