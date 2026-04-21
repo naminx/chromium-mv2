@@ -22,6 +22,15 @@
           pkgs.bash
           pkgs.coreutils
           pkgs.hcloud
+          # toolchain packager dependencies
+          pkgs.git
+          pkgs.p7zip
+          pkgs.gh
+          pkgs.qemu
+          pkgs.util-linux  # mount/umount
+          (pkgs.python3.withPackages (ps: [
+            ps.py7zr
+          ]))
         ];
         shellHook = ''
           echo "🐳 Build shell ready. Run: ./build-docker.sh <CHROMIUM_VERSION>"

@@ -43,6 +43,47 @@ done
 
 if [ -z "$HCLOUD_TOKEN" ]; then echo "❌ ERROR: HCLOUD_TOKEN not set."; exit 1; fi
 
+# ── 0.3 Toolchain Look-Ahead (Safety First) ──────────────────────────────────
+# WHY: We peek at the Chromium source code on GitHub BEFORE starting the build.
+# This prevents wasting money on a server only to find out at the very end 
+# that your Windows toolchain archive is the wrong version.
+if [ "$TARGET" = "win" ] || [ "$TARGET" = "all" ]; then
+    echo "🔍 Checking Windows SDK requirements for Chromium $VERSION..."
+    VS_TOOLCHAIN_URL="https://raw.githubusercontent.com/chromium/chromium/$VERSION/build/vs_toolchain.py"
+    VS_PY=$(curl -sL "$VS_TOOLCHAIN_URL")
+    
+    if [ -z "$VS_PY" ]; then
+        echo "❌ ERROR: Could not fetch vs_toolchain.py for version $VERSION."
+        echo "   Check if the version tag is correct: https://github.com/chromium/chromium/tags"
+        exit 1
+    fi
+
+    REQ_SDK=$(echo "$VS_PY" | grep "SDK_VERSION =" | head -n 1 | cut -d"'" -f2)
+    REQ_HASH=$(echo "$VS_PY" | grep "TOOLCHAIN_HASH =" | head -n 1 | cut -d"'" -f2)
+    
+    echo "  -> Required SDK  : $REQ_SDK"
+    echo "  -> Required Hash : $REQ_HASH"
+
+    # Check our repository for the release
+    # REPO: github.com/naminx/chromium-mv2
+    CHECK_URL="https://github.com/naminx/chromium-mv2/releases/download/$REQ_SDK/$REQ_HASH.7z"
+    echo "  -> Checking Repo : $CHECK_URL"
+    
+    if ! curl -sL --head "$CHECK_URL" | grep -q "200 OK"; then
+        echo ""
+        echo "❌ FATAL: Required Windows Toolchain NOT found in your repository!"
+        echo "════════════════════════════════════════════════════════════════════"
+        echo " Action Required:"
+        echo " 1. Boot your Windows VM."
+        echo " 2. Install Windows SDK: $REQ_SDK"
+        echo " 3. Run: ./package-toolchain.sh --version $REQ_SDK --hash $REQ_HASH"
+        echo " 4. This will upload the new $REQ_HASH.7z to GitHub."
+        echo "════════════════════════════════════════════════════════════════════"
+        exit 1
+    fi
+    echo "  ✅ Toolchain verified in repository."
+fi
+
 # ── 1. Validation & Cleanup ──────────────────────────────────────────────────
 if [ "$DO_CLEANUP" = "true" ]; then
     if [ -n "$REUSE_BEAST_IP" ] || [ -n "$REUSE_SEED_IP" ]; then

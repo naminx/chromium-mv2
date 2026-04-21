@@ -7,4 +7,5 @@ result-*
 .openclaude-profile.*
 mini_installer-*.exe
 chromium-browser-*.deb
+*.7z
 packager_output.log

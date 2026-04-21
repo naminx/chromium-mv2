@@ -598,45 +598,39 @@ def main():
         print('File list dumped successfully.')
         return 0
 
-    output = 'out.zip'
-    if os.path.exists(output):
-        os.unlink(output)
-    count = 0
+        count = 0
     version_match_count = 0
     total_size = 0
     missing_files = False
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED, True) as zf:
-        for disk_name, archive_name in files:
-            sys.stdout.write('\r%d/%d ...%s' %
-                             (count, len(files), disk_name[-40:]))
+
+    out_dir = 'win_toolchain'
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir)
+    os.makedirs(out_dir)
+
+    for disk_name, archive_name in files:
+        sys.stdout.write('\r%d/%d ...%s' % (count, len(files), disk_name[-40:]))
+        sys.stdout.flush()
+        count += 1
+        if not options.repackage_dir and disk_name.count(_win_version) > 0:
+            version_match_count += 1
+        if os.path.exists(disk_name):
+            total_size += os.path.getsize(disk_name)
+            if not options.dryrun:
+                target = os.path.join(out_dir, archive_name)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.copy2(disk_name, target)
+        else:
+            missing_files = True
+            sys.stdout.write('\r%s does not exist.\n\n' % disk_name)
             sys.stdout.flush()
-            count += 1
-            if not options.repackage_dir and disk_name.count(_win_version) > 0:
-                version_match_count += 1
-            if os.path.exists(disk_name):
-                total_size += os.path.getsize(disk_name)
-                if not options.dryrun:
-                    zf.write(disk_name, archive_name)
-            else:
-                missing_files = True
-                sys.stdout.write('\r%s does not exist.\n\n' % disk_name)
-                sys.stdout.flush()
-    sys.stdout.write(
-        '\r%1.3f GB of data in %d files, %d files for %s.%s\n' %
-        (total_size / 1e9, count, version_match_count, _win_version, ' ' * 50))
-    if options.dryrun:
-        return 0
+
+    sys.stdout.write('\r%1.3f GB of data in %d files, %d files for %s.%s\n' %
+                     (total_size / 1e9, count, version_match_count, _win_version, ' ' * 50))
     if missing_files:
         raise Exception('One or more files were missing - aborting')
-    if not options.repackage_dir and version_match_count == 0:
-        raise Exception('No files found that match the specified winversion')
-    sys.stdout.write('\rWrote to %s.%s\n' % (output, ' ' * 50))
-    sys.stdout.flush()
-
-    RenameToSha1(output)
-
+    sys.stdout.write('\nFinished copying files.\n')
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main())

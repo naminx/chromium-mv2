@@ -1,28 +1,66 @@
-# AI Assistant Context: Target Environment
+# CLAUDE.md
 
-When interacting with this system or writing testable terminal commands, keep the following environment quirks and constraints in mind:
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-## 1. Default Shell (Fish) & Aliases
-- The system heavily utilizes the **fish shell** as its default interactive shell, not bash or zsh!
-- Typical `bash`-isms like `VAR=value command_name` will fail natively in fish. Instead, they must be formatted using the `env` command (e.g., `env VAR=value command_name`). Ensure any copy-paste instructions you give the user respect fish syntax!
-- Complex `bash` background executions and grouping semantics (e.g., `{ ( command git push ) > /tmp/ag_output.txt 2>&1; echo "--DONE--" >> /tmp/ag_output.txt; } &`) will **fail in the fish shell**. If you absolutely must propose chained background commands, you must wrap the entire expression explicitly under bash: `bash -c '{ ( command git push ) > /tmp/ag_output.txt 2>&1; echo "--DONE--" >> /tmp/ag_output.txt; } &'`
-- Many standard POSIX commands are heavily aliased (e.g., `cat` -> `bat`, `ls` -> `eza`, `grep` -> `rg`, `rm` -> `rm2trash`, `find` -> `fd`, `git`). When automating terminal scripts or needing raw, predictable output without hanging the execution runner or triggering interactive behaviors, you **must prepend `command`** to EVERY external utility command (e.g., `command cat`, `command rm`, `command git`) to safely bypass these aliases and call the raw system binary.
-- **Xargs Warning:** When grouping commands using `xargs` and needing to bypass aliases, **do NOT** put `command` inside the `xargs` arguments (e.g., `xargs command docker kill` will FAIL). The `command` keyword is a shell built-in, and `xargs` expects a real binary in your `$PATH`. You should only prefix the outer `xargs` call. **Correct Usage:** `... | command xargs docker kill`.
-- **Subshell Redirection — No Issue:** `stderr` redirection inside fish command substitutions works correctly. `set VERSION (nix eval ... 2>/dev/null)` is valid and behaves as expected. (An earlier note blamed this for freezing, but the real cause was the **Starship prompt** delay — see Section 3.)
-## 2. Nix & NixOS Ecosystem
-- The user is running **NixOS**, configured natively using modern **Flakes** (`flake.nix`).
-- Commands like `nix-env`, `nix-shell`, or updates to legacy nix-channels should be avoided in favor of modern standard commands like `nix run`, `nix shell`, `nix build .#`, or `nixos-rebuild switch --flake .`.
-- Because the system uses Flakes, any Nix derivations, `import` statements, or scripts fetching URLs that are evaluated locally will run under **strict pure evaluation**. This means fetching remote tarballs requires strict `sha256` hashes, and local paths (like `./patches`) resolve securely within the Git repository structure, which can cause derivation hash mismatches if tested against older impure `nix-build` environments.
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-## 3. Git Commits & Pagers (The "Hanging Process" Bug)
-- The user has commit signing configured (GPG). **It is safe for the AI to run `git commit` via terminal commands!** The user's GPG agent and GUI pinentry handle the passphrase prompt seamlessly without freezing the background runner's TTY. You do not need to ask the user to commit manually.
-- Standard terminal commands that invoke a pager like `less` or `bat` (e.g., `git log`, `git diff`, `git status`) may hang AI execution loops forever. You must use `--no-pager`, pipe them to a file/`command cat`, or terminate the command explicitly.
-- For git work: Feel free to run `command git commit -m "..."` directly after staging files. It will succeed.
-- **Chained Command Signal Loss:** Never chain more than 2 commands together with `&&` in a single `run_command` call. When chained commands take longer than the `WaitMsBeforeAsync` threshold, the entire job is backgrounded and the VS Code shell-integration "command done" signal fires unreliably, causing `command_status` to report `RUNNING` indefinitely even though the real process has already exited. Always break complex sequential work into multiple separate `run_command` calls.
-- **Silent Command Completion:** Commands that produce **zero stdout output** on success (e.g. `rm`, `chmod`, `mkdir`, `mv`) cause the VS Code shell integration completion signal to misfire. Always append `&& echo ✓` to force at least one line of output: `command rm file1 && echo ✓`. This ensures the terminal renders output and the completion hook fires reliably. Also remember: `rm` is aliased to `rm2trash` so always use `command rm`.
-- **🔑 Root Cause — Starship Prompt:** The **Starship prompt** introduces a 100-200ms rendering delay after each command that causes the VS Code shell integration "done" signal to arrive out of sync with the AI's polling window, making `command_status` see `RUNNING` indefinitely even on completed commands. **YOU (the AI) MUST automatically redefine `fish_prompt` to disable Starship at the start of any terminal session!** Before running complex background commands, you must invoke `run_command` with `function fish_prompt; echo '❯ '; end`. Do not ask the user to do it—just do it yourself. This completely resolves silent command completion detection.
+## 1. Think Before Coding
 
-## 4. Hardware Profiles & Architecture
-- **Target Machine:** Intel Core i3-12100 (4 cores). Heavy C++ compilation tasks (like building `chromium` or LLVM from scratch) will take approximately ~6 hours locally if there is a cache miss.
-- **Sole Hardware Support:** The user ONLY plans to support **Intel x64 on Linux** (`x86_64-linux`).
-- **Nix Boilerplate Rule:** Because of this strict x64 support rule, you **do not** need to generate comprehensive `forAllSystems` loops or mention other architectures (like ARM/MacOS) when writing `flake.nix` files, derivation overrides, or standard `.nix` scripts for this user. Hardcode to `x86_64-linux` securely to save space.
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
