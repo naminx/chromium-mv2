@@ -1,295 +1,368 @@
-Apr 22 16:14:08 tokyo systemd[410982]: Queued start job for default target Main User Target.
-Apr 22 16:14:08 tokyo systemd[410982]: Created slice User Application Slice.
-Apr 22 16:14:08 tokyo systemd[410982]: Created slice User Core Session Slice.
-Apr 22 16:14:08 tokyo systemd[410982]: Started Daily Cleanup of User's Temporary Directories.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Paths.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Timers.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting D-Bus User Message Bus Socket...
-Apr 22 16:14:08 tokyo systemd[410982]: Starting GCR ssh-agent wrapper...
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on PipeWire PulseAudio.
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on PipeWire Multimedia System Sockets.
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on Podman API Socket.
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on Speech Dispatcher Socket.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting Create User Files and Directories...
-Apr 22 16:14:08 tokyo systemd[410982]: Finished Create User Files and Directories.
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on D-Bus User Message Bus Socket.
-Apr 22 16:14:08 tokyo systemd[410982]: Listening on GCR ssh-agent wrapper.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Sockets.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Basic System.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting D-Bus User Message Bus...
-Apr 22 16:14:08 tokyo systemd[410982]: Started GCR ssh-agent wrapper.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting Run user-specific NixOS activation...
-Apr 22 16:14:08 tokyo systemd[410982]: Starting onedrive-launcher.service...
-Apr 22 16:14:08 tokyo systemd[410982]: Started D-Bus User Message Bus.
-Apr 22 16:14:08 tokyo systemd[410982]: Finished Run user-specific NixOS activation.
-Apr 22 16:14:08 tokyo systemd[410982]: Created slice Slice /app/onedrive.
-Apr 22 16:14:08 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:08 tokyo systemd[410982]: Finished onedrive-launcher.service.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Main User Target.
-Apr 22 16:14:08 tokyo systemd[410982]: Startup finished in 236ms.
-Apr 22 16:14:08 tokyo .gnome-session-[411013]: Starting GNOME session target: gnome-session-wayland@gnome-login.target
-Apr 22 16:14:08 tokyo onedrive[411014]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:08 tokyo onedrive[411014]: WARNING: D-Bus message bus daemon is not available; GUI notifications are disabled
-Apr 22 16:14:08 tokyo onedrive[411014]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:08 tokyo onedrive[411014]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:08 tokyo systemd[410982]: Created slice Slice /app/gnome-session-manager.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target GNOME Wayland Session.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target GNOME Shell.
-Apr 22 16:14:08 tokyo systemd[410982]: GNOME Initial Setup Copy Worker skipped, unmet condition check ConditionEnvironment=XDG_SESSION_CLASS=user
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Session services which should run early before the graphical session is brought up.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting Monitor Session leader for GNOME Session...
-Apr 22 16:14:08 tokyo systemd[410982]: Started Monitor Session leader for GNOME Session.
-Apr 22 16:14:08 tokyo systemd[410982]: Reached target Tasks to be run before GNOME Session starts.
-Apr 22 16:14:08 tokyo systemd[410982]: Starting GNOME Session Manager (session: gnome-login)...
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME Session Manager (session: gnome-login).
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME Session Manager is ready.
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME Shell on Wayland...
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Running GNOME Shell (using mutter 49.2) as a Wayland display server
-Apr 22 16:14:09 tokyo gnome-shell[411037]: No seat assigned, running headlessly
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Added device '/dev/dri/renderD128' (i915) using no mode setting.
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Created gbm renderer for '/dev/dri/renderD128'
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Boot VGA GPU /dev/dri/renderD128 selected as primary
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Obtained a high priority EGL context
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.a11y.Bus' unit='at-spi-dbus-bus.service' requested by ':1.8' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo systemd[410982]: Starting Accessibility services bus...
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.a11y.Bus'
-Apr 22 16:14:09 tokyo systemd[410982]: Started Accessibility services bus.
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Using public X11 display :1026, (using :1027 for managed services)
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Using Wayland display name 'wayland-0'
-Apr 22 16:14:09 tokyo at-spi-bus-launcher[411067]: dbus-daemon[411067]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo at-spi-bus-launcher[411067]: dbus-daemon[411067]: Successfully activated service 'org.a11y.atspi.Registry'
-Apr 22 16:14:09 tokyo at-spi-bus-launcher[411069]: SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Unset XDG_SESSION_ID, getCurrentSessionProxy() called outside a user session. Asking logind directly.
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating service name='org.gnome.Shell.Screencast' requested by ':1.7' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.freedesktop.impl.portal.PermissionStore' unit='xdg-permission-store.service' requested by ':1.7' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo systemd[410982]: Starting sandboxed app permission store...
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
-Apr 22 16:14:09 tokyo systemd[410982]: Started sandboxed app permission store.
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Registering session with GDM
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating service name='org.gnome.Shell.Notifications' requested by ':1.7' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Could not issue 'GetUnit' systemd call
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME Shell on Wayland.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME Session is initialized.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME basic session services.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME Session (session: gnome-login).
-Apr 22 16:14:09 tokyo systemd[410982]: Starting Signal initialization done to GNOME Session Manager...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME accessibility service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME keyboard configuration service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME keyboard shortcuts service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME power management service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME RFKill support service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME file sharing service...
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME smartcard service...
-Apr 22 16:14:09 tokyo gnome-session-service[411031]: Entering running state
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Failed to launch ibus-daemon: Failed to execute child process “ibus-daemon” (No such file or directory)
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME USB protection service...
-Apr 22 16:14:09 tokyo systemd[410982]: Finished Signal initialization done to GNOME Session Manager.
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Will monitor session c8
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME keyboard configuration service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME keyboard configuration target.
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Error looking up permission: GDBus.Error:org.freedesktop.portal.Error.NotFound: No entry for geolocation
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME accessibility service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME accessibility target.
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME RFKill support service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME RFKill support target.
-Apr 22 16:14:09 tokyo gsd-rfkill[411116]: Could not open rfkill device: Could not open RFKILL control device, please verify your installation
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME smartcard service.
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME USB protection service.
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME file sharing service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME file sharing target.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME smartcard target.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME USB protection target.
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME keyboard shortcuts service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME keyboard shortcuts target.
-Apr 22 16:14:09 tokyo gsd-media-keys[411105]: Unable to inhibit keypresses: GDBus.Error:org.freedesktop.DBus.Error.AccessDenied: Permission denied
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME power management service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME power management target.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME Session.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME Wayland Session (session: gnome-login).
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target Current graphical user session.
-Apr 22 16:14:09 tokyo systemd[410982]: GNOME Initial Setup skipped, unmet condition check ConditionEnvironment=XDG_SESSION_CLASS=user
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.gnome.Shell.Notifications'
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating service name='org.gnome.ScreenSaver' requested by ':1.19' (uid=60580 pid=411125 comm="/nix/store/xsws6zdlcz4wxpw4srbi48ndy9lqsgqj-gnome-")
-Apr 22 16:14:09 tokyo systemd[410982]: Started PipeWire Multimedia Service.
-Apr 22 16:14:09 tokyo systemd[410982]: Started PipeWire PulseAudio.
-Apr 22 16:14:09 tokyo systemd[410982]: Started Multimedia Service Session Manager.
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.freedesktop.portal.Desktop' unit='xdg-desktop-portal.service' requested by ':1.23' (uid=60580 pid=411075 comm="/nix/store/z31m80cmj9iz8nqapjg7g77df2zjnx6l-gjs-1.")
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Missing required core component Settings, expect trouble…
-Apr 22 16:14:09 tokyo systemd[410982]: Starting Portal service...
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.freedesktop.portal.Documents' unit='xdg-document-portal.service' requested by ':1.29' (uid=60580 pid=411199 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
-Apr 22 16:14:09 tokyo systemd[410982]: Starting flatpak document portal service...
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.gnome.ScreenSaver'
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.portal.Documents'
-Apr 22 16:14:09 tokyo systemd[410982]: Started flatpak document portal service.
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.freedesktop.impl.portal.desktop.gnome' unit='xdg-desktop-portal-gnome.service' requested by ':1.29' (uid=60580 pid=411199 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
-Apr 22 16:14:09 tokyo systemd[410982]: Starting Portal service (GNOME implementation)...
-Apr 22 16:14:09 tokyo gsd-media-keys[411105]: Failed to grab accelerator for keybinding settings:hibernate
-Apr 22 16:14:09 tokyo gsd-media-keys[411105]: Failed to grab accelerator for keybinding settings:playback-repeat
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='ca.desrt.dconf' unit='dconf.service' requested by ':1.7' (uid=60580 pid=411037 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
-Apr 22 16:14:09 tokyo gsd-usb-protection[411125]: Failed to fetch USBGuard parameters: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.usbguard1 was not provided by any .service files
-Apr 22 16:14:09 tokyo systemd[410982]: Starting User preferences database...
-Apr 22 16:14:09 tokyo onedrive[411014]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'ca.desrt.dconf'
-Apr 22 16:14:09 tokyo systemd[410982]: Started User preferences database.
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating service name='org.gnome.Settings.GlobalShortcutsProvider' requested by ':1.34' (uid=60580 pid=411252 comm="/nix/store/l0wk46sxivxfy7l3vf8n6fd5p9fkk7m0-xdg-de")
-Apr 22 16:14:09 tokyo onedrive[411014]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:09 tokyo onedrive[411014]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:09 tokyo onedrive[411014]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:09 tokyo onedrive[411014]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:09 tokyo onedrive[411014]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:09 tokyo onedrive[411014]: The OneDrive API could not be initialised
-Apr 22 16:14:09 tokyo gnome-shell[411298]: The XKEYBOARD keymap compiler (xkbcomp) reports:
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86OK
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86GoTo
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86VendorLogo
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectProgramGuide
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectProgramGuide
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectHome
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaLanguageMenu
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaTitleMenu
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86AudioChannelMode
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectPC
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectTV
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectCable
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectVCR
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectVCRPlus
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectSatellite
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectCD
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectTape
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectRadio
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectTuner
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaPlayer
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectTeletext
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaSelectAuxiliary
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86MediaPlaySlow
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86NumberEntryMode
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86RefreshRateToggle
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86Accessibility
-Apr 22 16:14:09 tokyo gnome-shell[411298]: > Warning:          Could not resolve keysym XF86DoNotDisturb
-Apr 22 16:14:09 tokyo gnome-shell[411298]: Errors from xkbcomp are not fatal to the X server
-Apr 22 16:14:09 tokyo gnome-shell[411037]: Could not issue 'GetUnit' systemd call
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME session X11 services.
-Apr 22 16:14:09 tokyo systemd[410982]: Starting GNOME XSettings service...
-Apr 22 16:14:09 tokyo .gnome-shell-wr[411037]: Failed to launch ibus-daemon: Failed to execute child process “ibus-daemon” (No such file or directory)
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.gnome.Settings.GlobalShortcutsProvider'
-Apr 22 16:14:09 tokyo wireplumber[411182]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
-Apr 22 16:14:09 tokyo wireplumber[411182]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
-Apr 22 16:14:09 tokyo wireplumber[411182]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
-Apr 22 16:14:09 tokyo wireplumber[411182]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
-Apr 22 16:14:09 tokyo systemd[410982]: Started GNOME XSettings service.
-Apr 22 16:14:09 tokyo systemd[410982]: Reached target GNOME session X11 services.
-Apr 22 16:14:09 tokyo systemd[410982]: GNOME XSettings target is inactive.
-Apr 22 16:14:09 tokyo gsd-xsettings[411306]: Failed to get current UI scaling factor: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Name "org.gnome.Mutter.X11" does not exist
-Apr 22 16:14:09 tokyo gsd-xsettings[411316]: /run/current-system/sw/etc/xdg/Xwayland-session.d/00-at-spi: line 10: exec: xprop: not found
-Apr 22 16:14:09 tokyo wireplumber[411182]: [15:40:09.134866996] [411182]  INFO IPAManager ipa_manager.cpp:147 libcamera is not installed. Adding '/nix/store/src/ipa' to the IPA search path
-Apr 22 16:14:09 tokyo wireplumber[411182]: [15:40:09.134982732] [411182]  INFO Camera camera_manager.cpp:340 libcamera v0.6.0
-Apr 22 16:14:09 tokyo wireplumber[411182]: [15:40:09.136475689] [411334] ERROR MediaDevice media_device.cpp:485 /dev/media0[]: Failed to open media device at /dev/media0: Permission denied
-Apr 22 16:14:09 tokyo wireplumber[411182]: [15:40:09.136488720] [411334]  INFO DeviceEnumerator device_enumerator.cpp:224 Unable to populate media device /dev/media0 (Permission denied), skipping
-Apr 22 16:14:09 tokyo wireplumber[411182]: [15:40:09.136494381] [411334]  WARN DeviceEnumerator device_enumerator_udev.cpp:174 Failed to add device for '/sys/devices/pci0000:00/0000:00:14.0/usb1/1-10/1-10:1.0/media0', skipping
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.impl.portal.desktop.gnome'
-Apr 22 16:14:09 tokyo systemd[410982]: Started Portal service (GNOME implementation).
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating via systemd: service name='org.freedesktop.impl.portal.desktop.gtk' unit='xdg-desktop-portal-gtk.service' requested by ':1.29' (uid=60580 pid=411199 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
-Apr 22 16:14:09 tokyo systemd[410982]: Starting Portal service (GTK/GNOME implementation)...
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
-Apr 22 16:14:09 tokyo systemd[410982]: Started Portal service (GTK/GNOME implementation).
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Activating service name='org.freedesktop.secrets' requested by ':1.29' (uid=60580 pid=411199 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
-Apr 22 16:14:09 tokyo gnome-keyring-daemon[411352]: couldn't access control socket: /run/user/60580/keyring/control: No such file or directory
-Apr 22 16:14:09 tokyo gnome-keyring-daemon[411352]: discover_other_daemon: 0
-Apr 22 16:14:09 tokyo gnome-keyring-daemon[411352]: couldn't access control socket: /run/user/60580/keyring/control: No such file or directory
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.secrets'
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.freedesktop.portal.Desktop'
-Apr 22 16:14:09 tokyo systemd[410982]: Started Portal service.
-Apr 22 16:14:09 tokyo dbus-daemon[411000]: [session uid=60580 pid=411000] Successfully activated service 'org.gnome.Shell.Screencast'
-Apr 22 16:14:10 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:10 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:13 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 1.
-Apr 22 16:14:13 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:13 tokyo onedrive[411373]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:13 tokyo onedrive[411373]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:13 tokyo onedrive[411373]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:13 tokyo onedrive[411373]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:13 tokyo onedrive[411373]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:13 tokyo onedrive[411373]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:13 tokyo onedrive[411373]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:13 tokyo onedrive[411373]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:13 tokyo onedrive[411373]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:13 tokyo onedrive[411373]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:13 tokyo onedrive[411373]: The OneDrive API could not be initialised
-Apr 22 16:14:14 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:14 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:17 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 2.
-Apr 22 16:14:17 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:17 tokyo onedrive[411393]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:17 tokyo onedrive[411393]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:17 tokyo onedrive[411393]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:17 tokyo onedrive[411393]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:17 tokyo onedrive[411393]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:18 tokyo onedrive[411393]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:18 tokyo onedrive[411393]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:18 tokyo onedrive[411393]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:18 tokyo onedrive[411393]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:18 tokyo onedrive[411393]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:18 tokyo onedrive[411393]: The OneDrive API could not be initialised
-Apr 22 16:14:18 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:18 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:21 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 3.
-Apr 22 16:14:21 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:21 tokyo onedrive[411410]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:21 tokyo onedrive[411410]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:21 tokyo onedrive[411410]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:21 tokyo onedrive[411410]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:22 tokyo onedrive[411410]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:22 tokyo onedrive[411410]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:22 tokyo onedrive[411410]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:22 tokyo onedrive[411410]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:22 tokyo onedrive[411410]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:22 tokyo onedrive[411410]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:22 tokyo onedrive[411410]: The OneDrive API could not be initialised
-Apr 22 16:14:23 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:23 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:26 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 4.
-Apr 22 16:14:26 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:26 tokyo onedrive[411463]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:26 tokyo onedrive[411463]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:26 tokyo onedrive[411463]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:26 tokyo onedrive[411463]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:27 tokyo onedrive[411463]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:27 tokyo onedrive[411463]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:27 tokyo onedrive[411463]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:27 tokyo onedrive[411463]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:27 tokyo onedrive[411463]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:27 tokyo onedrive[411463]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:27 tokyo onedrive[411463]: The OneDrive API could not be initialised
-Apr 22 16:14:27 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:27 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:30 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 5.
-Apr 22 16:14:30 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:30 tokyo onedrive[411489]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:30 tokyo onedrive[411489]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:30 tokyo onedrive[411489]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:30 tokyo onedrive[411489]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:31 tokyo onedrive[411489]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:31 tokyo onedrive[411489]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:31 tokyo onedrive[411489]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:31 tokyo onedrive[411489]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:31 tokyo onedrive[411489]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:31 tokyo onedrive[411489]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:31 tokyo onedrive[411489]: The OneDrive API could not be initialised
-Apr 22 16:14:32 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:32 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:35 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 6.
-Apr 22 16:14:35 tokyo systemd[410982]: Started Onedrive sync service.
-Apr 22 16:14:35 tokyo onedrive[411510]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
-Apr 22 16:14:35 tokyo onedrive[411510]: D-Bus message bus daemon is available; GUI notifications are now enabled
-Apr 22 16:14:35 tokyo onedrive[411510]: Using IPv4 and IPv6 (if configured) for all network operations
-Apr 22 16:14:35 tokyo onedrive[411510]: Attempting to contact the Microsoft OneDrive Service
-Apr 22 16:14:35 tokyo onedrive[411510]: Successfully reached the Microsoft OneDrive Service
-Apr 22 16:14:36 tokyo onedrive[411510]: Configuring Global Azure AD Endpoints
-Apr 22 16:14:36 tokyo onedrive[411510]: Please authorise this application by visiting the following URL:
-Apr 22 16:14:36 tokyo onedrive[411510]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
-Apr 22 16:14:36 tokyo onedrive[411510]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
-Apr 22 16:14:36 tokyo onedrive[411510]: Paste redirect URI here: An empty or invalid response uri was entered
-Apr 22 16:14:36 tokyo onedrive[411510]: The OneDrive API could not be initialised
-Apr 22 16:14:36 tokyo systemd[410982]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
-Apr 22 16:14:36 tokyo systemd[410982]: onedrive@onedrive.service: Failed with result 'exit-code'.
-Apr 22 16:14:39 tokyo systemd[410982]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 7.
+Apr 22 22:37:22 tokyo systemd[15222]: Queued start job for default target Main User Target.
+Apr 22 22:37:22 tokyo systemd[15222]: Created slice User Application Slice.
+Apr 22 22:37:22 tokyo systemd[15222]: Created slice User Core Session Slice.
+Apr 22 22:37:22 tokyo systemd[15222]: Started Daily Cleanup of User's Temporary Directories.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Paths.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Timers.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting D-Bus User Message Bus Socket...
+Apr 22 22:37:22 tokyo systemd[15222]: Starting GCR ssh-agent wrapper...
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on PipeWire PulseAudio.
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on PipeWire Multimedia System Sockets.
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on Podman API Socket.
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on Speech Dispatcher Socket.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting Create User Files and Directories...
+Apr 22 22:37:22 tokyo systemd[15222]: Finished Create User Files and Directories.
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on D-Bus User Message Bus Socket.
+Apr 22 22:37:22 tokyo systemd[15222]: Listening on GCR ssh-agent wrapper.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Sockets.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Basic System.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting D-Bus User Message Bus...
+Apr 22 22:37:22 tokyo systemd[15222]: Started GCR ssh-agent wrapper.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting Run user-specific NixOS activation...
+Apr 22 22:37:22 tokyo systemd[15222]: Starting onedrive-launcher.service...
+Apr 22 22:37:22 tokyo systemd[15222]: Started D-Bus User Message Bus.
+Apr 22 22:37:22 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.systemd1'
+Apr 22 22:37:22 tokyo systemd[15222]: Finished Run user-specific NixOS activation.
+Apr 22 22:37:22 tokyo systemd[15222]: Created slice Slice /app/onedrive.
+Apr 22 22:37:22 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:22 tokyo systemd[15222]: Finished onedrive-launcher.service.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Main User Target.
+Apr 22 22:37:22 tokyo systemd[15222]: Startup finished in 260ms.
+Apr 22 22:37:22 tokyo .gnome-session-[15261]: Starting GNOME session target: gnome-session-wayland@gnome-login.target
+Apr 22 22:37:22 tokyo systemd[15222]: Created slice Slice /app/gnome-session-manager.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target GNOME Wayland Session.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target GNOME Shell.
+Apr 22 22:37:22 tokyo systemd[15222]: GNOME Initial Setup Copy Worker skipped, unmet condition check ConditionEnvironment=XDG_SESSION_CLASS=user
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Session services which should run early before the graphical session is brought up.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting Monitor Session leader for GNOME Session...
+Apr 22 22:37:22 tokyo onedrive[15262]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:22 tokyo systemd[15222]: Started Monitor Session leader for GNOME Session.
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target Tasks to be run before GNOME Session starts.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting GNOME Session Manager (session: gnome-login)...
+Apr 22 22:37:22 tokyo onedrive[15262]: WARNING: D-Bus message bus daemon is not available; GUI notifications are disabled
+Apr 22 22:37:22 tokyo onedrive[15262]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:22 tokyo onedrive[15262]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:22 tokyo systemd[15222]: Started GNOME Session Manager (session: gnome-login).
+Apr 22 22:37:22 tokyo systemd[15222]: Reached target GNOME Session Manager is ready.
+Apr 22 22:37:22 tokyo systemd[15222]: Starting GNOME Shell on Wayland...
+Apr 22 22:37:22 tokyo gnome-shell[15285]: Running GNOME Shell (using mutter 49.2) as a Wayland display server
+Apr 22 22:37:22 tokyo gnome-shell[15285]: No seat assigned, running headlessly
+Apr 22 22:37:22 tokyo gnome-shell[15285]: Added device '/dev/dri/renderD128' (i915) using no mode setting.
+Apr 22 22:37:22 tokyo gnome-shell[15285]: Created gbm renderer for '/dev/dri/renderD128'
+Apr 22 22:37:22 tokyo gnome-shell[15285]: Boot VGA GPU /dev/dri/renderD128 selected as primary
+Apr 22 22:37:22 tokyo gnome-shell[15285]: Obtained a high priority EGL context
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.a11y.Bus' unit='at-spi-dbus-bus.service' requested by ':1.8' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting Accessibility services bus...
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.a11y.Bus'
+Apr 22 22:37:23 tokyo systemd[15222]: Started Accessibility services bus.
+Apr 22 22:37:23 tokyo gnome-shell[15285]: Using public X11 display :1026, (using :1027 for managed services)
+Apr 22 22:37:23 tokyo gnome-shell[15285]: Using Wayland display name 'wayland-0'
+Apr 22 22:37:23 tokyo at-spi-bus-launcher[15315]: dbus-daemon[15315]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo at-spi-bus-launcher[15315]: dbus-daemon[15315]: Successfully activated service 'org.a11y.atspi.Registry'
+Apr 22 22:37:23 tokyo at-spi-bus-launcher[15318]: SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Unset XDG_SESSION_ID, getCurrentSessionProxy() called outside a user session. Asking logind directly.
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating service name='org.gnome.Shell.Screencast' requested by ':1.7' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo onedrive[15262]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.freedesktop.impl.portal.PermissionStore' unit='xdg-permission-store.service' requested by ':1.7' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting sandboxed app permission store...
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+Apr 22 22:37:23 tokyo systemd[15222]: Started sandboxed app permission store.
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Registering session with GDM
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating service name='org.gnome.Shell.Notifications' requested by ':1.7' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo gnome-shell[15285]: Could not issue 'GetUnit' systemd call
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME Shell on Wayland.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME Session is initialized.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME basic session services.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME Session (session: gnome-login).
+Apr 22 22:37:23 tokyo systemd[15222]: Starting Signal initialization done to GNOME Session Manager...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME accessibility service...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME keyboard configuration service...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME keyboard shortcuts service...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME power management service...
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Failed to launch ibus-daemon: Failed to execute child process “ibus-daemon” (No such file or directory)
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME RFKill support service...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME file sharing service...
+Apr 22 22:37:23 tokyo gnome-session-service[15278]: Entering running state
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME smartcard service...
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME USB protection service...
+Apr 22 22:37:23 tokyo systemd[15222]: Finished Signal initialization done to GNOME Session Manager.
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Will monitor session c3
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME accessibility service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME accessibility target.
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME keyboard configuration service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME keyboard configuration target.
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Error looking up permission: GDBus.Error:org.freedesktop.portal.Error.NotFound: No entry for geolocation
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME smartcard service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME smartcard target.
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME file sharing service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME file sharing target.
+Apr 22 22:37:23 tokyo gsd-rfkill[15365]: Could not open rfkill device: Could not open RFKILL control device, please verify your installation
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME RFKill support service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME RFKill support target.
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME USB protection service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME USB protection target.
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME power management service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME power management target.
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.gnome.Shell.Notifications'
+Apr 22 22:37:23 tokyo onedrive[15262]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:23 tokyo onedrive[15262]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:23 tokyo onedrive[15262]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:23 tokyo onedrive[15262]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:23 tokyo onedrive[15262]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:23 tokyo onedrive[15262]: The OneDrive API could not be initialised
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating service name='org.gnome.ScreenSaver' requested by ':1.19' (uid=60580 pid=15371 comm="/nix/store/xsws6zdlcz4wxpw4srbi48ndy9lqsgqj-gnome-")
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME keyboard shortcuts service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME keyboard shortcuts target.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME Session.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME Wayland Session (session: gnome-login).
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target Current graphical user session.
+Apr 22 22:37:23 tokyo systemd[15222]: GNOME Initial Setup skipped, unmet condition check ConditionEnvironment=XDG_SESSION_CLASS=user
+Apr 22 22:37:23 tokyo gsd-media-keys[15353]: Unable to inhibit keypresses: GDBus.Error:org.freedesktop.DBus.Error.AccessDenied: Permission denied
+Apr 22 22:37:23 tokyo systemd[15222]: Started PipeWire Multimedia Service.
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Missing required core component Settings, expect trouble…
+Apr 22 22:37:23 tokyo systemd[15222]: Started PipeWire PulseAudio.
+Apr 22 22:37:23 tokyo systemd[15222]: Started Multimedia Service Session Manager.
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.freedesktop.portal.Desktop' unit='xdg-desktop-portal.service' requested by ':1.24' (uid=60580 pid=15324 comm="/nix/store/z31m80cmj9iz8nqapjg7g77df2zjnx6l-gjs-1.")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting Portal service...
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.freedesktop.portal.Documents' unit='xdg-document-portal.service' requested by ':1.30' (uid=60580 pid=15452 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting flatpak document portal service...
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.gnome.ScreenSaver'
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='ca.desrt.dconf' unit='dconf.service' requested by ':1.7' (uid=60580 pid=15285 comm="/nix/store/k29i5y013dcb8hs5likzpm4wca7n01s7-gnome-")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting User preferences database...
+Apr 22 22:37:23 tokyo gsd-media-keys[15353]: Failed to grab accelerator for keybinding settings:playback-repeat
+Apr 22 22:37:23 tokyo gsd-media-keys[15353]: Failed to grab accelerator for keybinding settings:hibernate
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.portal.Documents'
+Apr 22 22:37:23 tokyo systemd[15222]: Started flatpak document portal service.
+Apr 22 22:37:23 tokyo gsd-usb-protection[15371]: Failed to fetch USBGuard parameters: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.usbguard1 was not provided by any .service files
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.freedesktop.impl.portal.desktop.gnome' unit='xdg-desktop-portal-gnome.service' requested by ':1.30' (uid=60580 pid=15452 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'ca.desrt.dconf'
+Apr 22 22:37:23 tokyo systemd[15222]: Starting Portal service (GNOME implementation)...
+Apr 22 22:37:23 tokyo systemd[15222]: Started User preferences database.
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating service name='org.gnome.Settings.GlobalShortcutsProvider' requested by ':1.34' (uid=60580 pid=15515 comm="/nix/store/l0wk46sxivxfy7l3vf8n6fd5p9fkk7m0-xdg-de")
+Apr 22 22:37:23 tokyo gnome-shell[15541]: The XKEYBOARD keymap compiler (xkbcomp) reports:
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86OK
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86GoTo
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86VendorLogo
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectProgramGuide
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectProgramGuide
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectHome
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaLanguageMenu
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaTitleMenu
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86AudioChannelMode
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectPC
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectTV
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectCable
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectVCR
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectVCRPlus
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectSatellite
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectCD
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectTape
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectRadio
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectTuner
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaPlayer
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectTeletext
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaSelectAuxiliary
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86MediaPlaySlow
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86NumberEntryMode
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86RefreshRateToggle
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86Accessibility
+Apr 22 22:37:23 tokyo gnome-shell[15541]: > Warning:          Could not resolve keysym XF86DoNotDisturb
+Apr 22 22:37:23 tokyo gnome-shell[15541]: Errors from xkbcomp are not fatal to the X server
+Apr 22 22:37:23 tokyo gnome-shell[15285]: Could not issue 'GetUnit' systemd call
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME session X11 services.
+Apr 22 22:37:23 tokyo systemd[15222]: Starting GNOME XSettings service...
+Apr 22 22:37:23 tokyo .gnome-shell-wr[15285]: Failed to launch ibus-daemon: Failed to execute child process “ibus-daemon” (No such file or directory)
+Apr 22 22:37:23 tokyo wireplumber[15430]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
+Apr 22 22:37:23 tokyo wireplumber[15430]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
+Apr 22 22:37:23 tokyo wireplumber[15430]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
+Apr 22 22:37:23 tokyo wireplumber[15430]: wp-event-dispatcher: wp_event_dispatcher_unregister_hook: assertion 'already_registered_dispatcher == self' failed
+Apr 22 22:37:23 tokyo systemd[15222]: Started GNOME XSettings service.
+Apr 22 22:37:23 tokyo systemd[15222]: Reached target GNOME session X11 services.
+Apr 22 22:37:23 tokyo systemd[15222]: GNOME XSettings target is inactive.
+Apr 22 22:37:23 tokyo gsd-xsettings[15549]: Failed to get current UI scaling factor: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Name "org.gnome.Mutter.X11" does not exist
+Apr 22 22:37:23 tokyo gsd-xsettings[15561]: /run/current-system/sw/etc/xdg/Xwayland-session.d/00-at-spi: line 10: exec: xprop: not found
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.gnome.Settings.GlobalShortcutsProvider'
+Apr 22 22:37:23 tokyo wireplumber[15430]: [0:38:34.553074366] [15430]  INFO IPAManager ipa_manager.cpp:147 libcamera is not installed. Adding '/nix/store/src/ipa' to the IPA search path
+Apr 22 22:37:23 tokyo wireplumber[15430]: [0:38:34.553191803] [15430]  INFO Camera camera_manager.cpp:340 libcamera v0.6.0
+Apr 22 22:37:23 tokyo wireplumber[15430]: [0:38:34.554682026] [15577] ERROR MediaDevice media_device.cpp:485 /dev/media0[]: Failed to open media device at /dev/media0: Permission denied
+Apr 22 22:37:23 tokyo wireplumber[15430]: [0:38:34.554694740] [15577]  INFO DeviceEnumerator device_enumerator.cpp:224 Unable to populate media device /dev/media0 (Permission denied), skipping
+Apr 22 22:37:23 tokyo wireplumber[15430]: [0:38:34.554702430] [15577]  WARN DeviceEnumerator device_enumerator_udev.cpp:174 Failed to add device for '/sys/devices/pci0000:00/0000:00:14.0/usb1/1-10/1-10:1.0/media0', skipping
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.impl.portal.desktop.gnome'
+Apr 22 22:37:23 tokyo systemd[15222]: Started Portal service (GNOME implementation).
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating via systemd: service name='org.freedesktop.impl.portal.desktop.gtk' unit='xdg-desktop-portal-gtk.service' requested by ':1.30' (uid=60580 pid=15452 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
+Apr 22 22:37:23 tokyo systemd[15222]: Starting Portal service (GTK/GNOME implementation)...
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+Apr 22 22:37:23 tokyo systemd[15222]: Started Portal service (GTK/GNOME implementation).
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Activating service name='org.freedesktop.secrets' requested by ':1.30' (uid=60580 pid=15452 comm="/nix/store/15vzkg4d013qp9yvj7hsf386x26k6bhg-xdg-de")
+Apr 22 22:37:23 tokyo gnome-keyring-daemon[15601]: couldn't access control socket: /run/user/60580/keyring/control: No such file or directory
+Apr 22 22:37:23 tokyo gnome-keyring-daemon[15601]: discover_other_daemon: 0
+Apr 22 22:37:23 tokyo gnome-keyring-daemon[15601]: couldn't access control socket: /run/user/60580/keyring/control: No such file or directory
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.secrets'
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.freedesktop.portal.Desktop'
+Apr 22 22:37:23 tokyo systemd[15222]: Started Portal service.
+Apr 22 22:37:23 tokyo dbus-daemon[15247]: [session uid=60580 pid=15247] Successfully activated service 'org.gnome.Shell.Screencast'
+Apr 22 22:37:24 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:24 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:27 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 1.
+Apr 22 22:37:27 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:27 tokyo onedrive[15620]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:27 tokyo onedrive[15620]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:27 tokyo onedrive[15620]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:27 tokyo onedrive[15620]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:27 tokyo onedrive[15620]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:27 tokyo onedrive[15620]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:27 tokyo onedrive[15620]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:27 tokyo onedrive[15620]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:27 tokyo onedrive[15620]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:27 tokyo onedrive[15620]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:27 tokyo onedrive[15620]: The OneDrive API could not be initialised
+Apr 22 22:37:28 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:28 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:31 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 2.
+Apr 22 22:37:31 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:31 tokyo onedrive[15670]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:31 tokyo onedrive[15670]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:31 tokyo onedrive[15670]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:31 tokyo onedrive[15670]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:32 tokyo onedrive[15670]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:32 tokyo onedrive[15670]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:32 tokyo onedrive[15670]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:32 tokyo onedrive[15670]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:32 tokyo onedrive[15670]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:32 tokyo onedrive[15670]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:32 tokyo onedrive[15670]: The OneDrive API could not be initialised
+Apr 22 22:37:32 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:32 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:36 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 3.
+Apr 22 22:37:36 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:36 tokyo onedrive[15686]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:36 tokyo onedrive[15686]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:36 tokyo onedrive[15686]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:36 tokyo onedrive[15686]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:36 tokyo onedrive[15686]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:37 tokyo onedrive[15686]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:37 tokyo onedrive[15686]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:37 tokyo onedrive[15686]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:37 tokyo onedrive[15686]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:37 tokyo onedrive[15686]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:37 tokyo onedrive[15686]: The OneDrive API could not be initialised
+Apr 22 22:37:37 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:37 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:40 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 4.
+Apr 22 22:37:40 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:40 tokyo onedrive[15742]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:40 tokyo onedrive[15742]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:40 tokyo onedrive[15742]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:40 tokyo onedrive[15742]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:41 tokyo onedrive[15742]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:41 tokyo onedrive[15742]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:41 tokyo onedrive[15742]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:41 tokyo onedrive[15742]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:41 tokyo onedrive[15742]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:41 tokyo onedrive[15742]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:41 tokyo onedrive[15742]: The OneDrive API could not be initialised
+Apr 22 22:37:41 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:41 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:44 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 5.
+Apr 22 22:37:44 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:44 tokyo onedrive[15760]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:44 tokyo onedrive[15760]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:44 tokyo onedrive[15760]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:44 tokyo onedrive[15760]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:45 tokyo onedrive[15760]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:45 tokyo onedrive[15760]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:45 tokyo onedrive[15760]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:45 tokyo onedrive[15760]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:45 tokyo onedrive[15760]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:45 tokyo onedrive[15760]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:45 tokyo onedrive[15760]: The OneDrive API could not be initialised
+Apr 22 22:37:46 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:46 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:49 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 6.
+Apr 22 22:37:49 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:49 tokyo onedrive[15775]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:49 tokyo onedrive[15775]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:49 tokyo onedrive[15775]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:49 tokyo onedrive[15775]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:49 tokyo onedrive[15775]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:49 tokyo onedrive[15775]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:49 tokyo onedrive[15775]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:49 tokyo onedrive[15775]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:49 tokyo onedrive[15775]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:49 tokyo onedrive[15775]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:49 tokyo onedrive[15775]: The OneDrive API could not be initialised
+Apr 22 22:37:50 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:50 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:53 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 7.
+Apr 22 22:37:53 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:53 tokyo onedrive[15796]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:53 tokyo onedrive[15796]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:53 tokyo onedrive[15796]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:53 tokyo onedrive[15796]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:54 tokyo onedrive[15796]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:54 tokyo onedrive[15796]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:54 tokyo onedrive[15796]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:54 tokyo onedrive[15796]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:54 tokyo onedrive[15796]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:54 tokyo onedrive[15796]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:54 tokyo onedrive[15796]: The OneDrive API could not be initialised
+Apr 22 22:37:54 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:54 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:37:57 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 8.
+Apr 22 22:37:57 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:37:57 tokyo onedrive[15838]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:37:57 tokyo onedrive[15838]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:37:57 tokyo onedrive[15838]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:37:57 tokyo onedrive[15838]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:37:58 tokyo onedrive[15838]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:37:58 tokyo onedrive[15838]: Configuring Global Azure AD Endpoints
+Apr 22 22:37:58 tokyo onedrive[15838]: Please authorise this application by visiting the following URL:
+Apr 22 22:37:58 tokyo onedrive[15838]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:37:58 tokyo onedrive[15838]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:37:58 tokyo onedrive[15838]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:37:58 tokyo onedrive[15838]: The OneDrive API could not be initialised
+Apr 22 22:37:59 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:37:59 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:38:02 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 9.
+Apr 22 22:38:02 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:38:02 tokyo onedrive[15864]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:38:02 tokyo onedrive[15864]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:38:02 tokyo onedrive[15864]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:38:02 tokyo onedrive[15864]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:38:03 tokyo onedrive[15864]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:38:03 tokyo onedrive[15864]: Configuring Global Azure AD Endpoints
+Apr 22 22:38:03 tokyo onedrive[15864]: Please authorise this application by visiting the following URL:
+Apr 22 22:38:03 tokyo onedrive[15864]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:38:03 tokyo onedrive[15864]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:38:03 tokyo onedrive[15864]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:38:03 tokyo onedrive[15864]: The OneDrive API could not be initialised
+Apr 22 22:38:03 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:38:03 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:38:06 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 10.
+Apr 22 22:38:06 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:38:06 tokyo onedrive[15959]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:38:06 tokyo onedrive[15959]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:38:06 tokyo onedrive[15959]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:38:06 tokyo onedrive[15959]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:38:07 tokyo onedrive[15959]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:38:07 tokyo onedrive[15959]: Configuring Global Azure AD Endpoints
+Apr 22 22:38:07 tokyo onedrive[15959]: Please authorise this application by visiting the following URL:
+Apr 22 22:38:07 tokyo onedrive[15959]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:38:07 tokyo onedrive[15959]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:38:07 tokyo onedrive[15959]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:38:07 tokyo onedrive[15959]: The OneDrive API could not be initialised
+Apr 22 22:38:08 tokyo systemd[15222]: onedrive@onedrive.service: Main process exited, code=exited, status=1/FAILURE
+Apr 22 22:38:08 tokyo systemd[15222]: onedrive@onedrive.service: Failed with result 'exit-code'.
+Apr 22 22:38:11 tokyo systemd[15222]: onedrive@onedrive.service: Scheduled restart job, restart counter is at 11.
+Apr 22 22:38:11 tokyo systemd[15222]: Started Onedrive sync service.
+Apr 22 22:38:11 tokyo onedrive[16009]: ERROR: Unable to create the required application configuration directory: /run/gdm-2: Permission denied
+Apr 22 22:38:11 tokyo onedrive[16009]: D-Bus message bus daemon is available; GUI notifications are now enabled
+Apr 22 22:38:11 tokyo onedrive[16009]: Using IPv4 and IPv6 (if configured) for all network operations
+Apr 22 22:38:11 tokyo onedrive[16009]: Attempting to contact the Microsoft OneDrive Service
+Apr 22 22:38:11 tokyo onedrive[16009]: Successfully reached the Microsoft OneDrive Service
+Apr 22 22:38:11 tokyo onedrive[16009]: Configuring Global Azure AD Endpoints
+Apr 22 22:38:11 tokyo onedrive[16009]: Please authorise this application by visiting the following URL:
+Apr 22 22:38:11 tokyo onedrive[16009]: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+Apr 22 22:38:11 tokyo onedrive[16009]: After completing the authorisation in your browser, copy the full redirect URI (from the address bar) and paste it below.
+Apr 22 22:38:11 tokyo onedrive[16009]: Paste redirect URI here: An empty or invalid response uri was entered
+Apr 22 22:38:11 tokyo onedrive[16009]: The OneDrive API could not be initialised
