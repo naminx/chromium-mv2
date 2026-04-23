@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -e
 
+export HETZNER_TOKEN="${HETZNER_TOKEN:-$HCLOUD_TOKEN}"
+export HCLOUD_TOKEN="${HCLOUD_TOKEN:-$HETZNER_TOKEN}"
+
 # ── Auto-Discovery ───────────────────────────────────────────────────────────
 if [ -z "$1" ]; then
-    if [ -z "$HCLOUD_TOKEN" ]; then
+    if [ -z "$HETZNER_TOKEN" ]; then
         echo "🔐 Auto-discovery requires an API token."
-        echo "   Please run: export HCLOUD_TOKEN=\"your_api_key\""
+        echo "   Please run: export HETZNER_TOKEN=\"your_api_key\""
         echo "   Or provide the IP: ./tail-hetzner.sh <IP>"
         exit 1
     fi
     if command -v hcloud &> /dev/null; then
         echo "🔍 Searching for active Chromium build or sync server..."
+
         # Try finding the Beast first (compiling)
         HETZNER_IP=$(hcloud server list --selector build=chromium-beast -o json | jq -r '.[0].public_net.ipv4.ip // ""')
         

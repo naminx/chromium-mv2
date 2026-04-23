@@ -78,6 +78,8 @@ PYTHON
             git clone --depth 1 --branch "$CHROMIUM_VERSION" --progress https://chromium.googlesource.com/chromium/src.git
         else 
             echo "🚀 Performing high-speed manual fetch of src tag $CHROMIUM_VERSION..."
+            git -C src reset --hard HEAD 2>/dev/null || true
+            git -C src clean -fd 2>/dev/null || true
             git -C src fetch origin "refs/tags/$CHROMIUM_VERSION" --depth 1 --progress && git -C src checkout FETCH_HEAD
         fi
 
@@ -100,6 +102,7 @@ PYTHON
     # 1.4 Recurse into Docker
     echo "🚀 Launching build engine..."
     docker run --rm -i \
+        --ulimit nofile=65536:65536 \
         --network host --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
         -v "$(pwd):/chromium" \
         -v "${SCRIPT_DIR}/patches:/patches:ro" \
@@ -108,8 +111,12 @@ PYTHON
         -e "VOLUME_NAME=/chromium" \
         -e "VPYTHON_VENV_ROOT=/chromium/.cache/vpython" \
         -e "PIP_CACHE_DIR=/chromium/.cache/pip" \
-        -e "HCLOUD_TOKEN=${HCLOUD_TOKEN}" \
+        -e "HETZNER_TOKEN=${HETZNER_TOKEN}" \
         -e "GITHUB_TOKEN=${GITHUB_TOKEN}" \
+        -e "CHROMIUM_MV2_API_KEY=${CHROMIUM_MV2_API_KEY}" \
+        -e "CHROMIUM_MV2_CLIENT_ID=${CHROMIUM_MV2_CLIENT_ID}" \
+        -e "CHROMIUM_MV2_CLIENT_SECRET=${CHROMIUM_MV2_CLIENT_SECRET}" \
+        -e "SDK_VER=${SDK_VER}" \
         "$IMAGE_NAME" bash "/chromium/$(basename "$0")" "$CHROMIUM_VERSION" --target "$BUILD_TARGET"
     exit $?
 fi
@@ -119,6 +126,7 @@ set -e
 cd "$VOLUME_NAME"
 export PATH="/depot_tools:$PATH"
 export GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1
+ulimit -n 65536 || true
 
 # 2.1 CLEAN AND PATCH FIRST (WHY):
 # We must perform 'git reset' before the toolchain 'sed' patches, otherwise
@@ -129,6 +137,13 @@ git reset --hard HEAD 2>/dev/null || true; git clean -fd 2>/dev/null || true
 for p in /patches/*.patch; do 
     [ -f "$p" ] && echo "  🩹 Applying: $(basename "$p")" && patch -p1 --forward --batch < "$p" || true
 done
+
+if [ -n "$CHROMIUM_MV2_API_KEY" ]; then
+    echo "🔑 Injecting private API keys..."
+    sed -i "s/CUSTOM_GOOGLE_API_KEY_PLACEHOLDER/$CHROMIUM_MV2_API_KEY/g" google_apis/default_api_keys.h 2>/dev/null || true
+    sed -i "s/CUSTOM_GOOGLE_CLIENT_ID_PLACEHOLDER/$CHROMIUM_MV2_CLIENT_ID/g" google_apis/default_api_keys.h 2>/dev/null || true
+    sed -i "s/CUSTOM_GOOGLE_CLIENT_SECRET_PLACEHOLDER/$CHROMIUM_MV2_CLIENT_SECRET/g" google_apis/default_api_keys.h 2>/dev/null || true
+fi
 
 # 2.2 Incremental Intelligence (WHY):
 # Chromium builds take 6+ hours. By restoring timestamps for unchanged files
@@ -147,6 +162,10 @@ fi
 # 2.3 Windows Toolchain Configuration (PROVEN METHOD)
 if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
     HASH="e66617bc68"; TOOLCHAIN_ROOT="$VOLUME_NAME/win_toolchain"; TOOLCHAIN_DEST="$TOOLCHAIN_ROOT/vs_files/$HASH"
+    # Derive SDK_VER from vs_toolchain.py if not already set by the caller
+    if [ -z "$SDK_VER" ] && [ -f build/vs_toolchain.py ]; then
+        SDK_VER=$(grep "SDK_VERSION =" build/vs_toolchain.py | head -n1 | cut -d"'" -f2)
+    fi
     
     # 2.3.1 ciopfs Mount (WHY):
     # Windows headers use MixedCase. Linux is case-sensitive. ciopfs emulates

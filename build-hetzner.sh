@@ -12,8 +12,13 @@ usage() {
     echo "Usage: $0 <VERSION> --target <deb|win> [options]"
     echo ""
     echo "Environment Variables (Required):"
-    echo "  HCLOUD_TOKEN        Hetzner Cloud API Token"
+    echo "  HETZNER_TOKEN       Hetzner Cloud API Token"
     echo "  GITHUB_TOKEN        GitHub Personal Access Token"
+    echo ""
+    echo "Environment Variables (Optional, for Chromium Sync):"
+    echo "  CHROMIUM_MV2_API_KEY"
+    echo "  CHROMIUM_MV2_CLIENT_ID"
+    echo "  CHROMIUM_MV2_CLIENT_SECRET"
     echo ""
     echo "Options:"
     echo "  --cleanup             Nuclear: Delete ALL build servers and volumes"
@@ -41,7 +46,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "$HCLOUD_TOKEN" ]; then echo "❌ ERROR: HCLOUD_TOKEN not set."; exit 1; fi
+export GITHUB_TOKEN="${GITHUB_TOKEN:-$GH_TOKEN}"
+export GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
+export HETZNER_TOKEN="${HETZNER_TOKEN:-$HCLOUD_TOKEN}"
+export HCLOUD_TOKEN="${HCLOUD_TOKEN:-$HETZNER_TOKEN}"
+
+if [ -z "$HETZNER_TOKEN" ]; then echo "❌ ERROR: HETZNER_TOKEN not set."; exit 1; fi
 
 # ── 0.3 Toolchain Look-Ahead (Safety First) ──────────────────────────────────
 # WHY: We peek at the Chromium source code on GitHub BEFORE starting the build.
@@ -69,7 +79,7 @@ if [ "$TARGET" = "win" ] || [ "$TARGET" = "all" ]; then
     CHECK_URL="https://github.com/naminx/chromium-mv2/releases/download/$REQ_SDK/$REQ_HASH.7z"
     echo "  -> Checking Repo : $CHECK_URL"
     
-    if ! curl -sL --head "$CHECK_URL" | grep -q "200 OK"; then
+    if [ "$(curl -sL -o /dev/null -w "%{http_code}" "$CHECK_URL")" != "200" ]; then
         echo ""
         echo "❌ FATAL: Required Windows Toolchain NOT found in your repository!"
         echo "════════════════════════════════════════════════════════════════════"
@@ -139,8 +149,12 @@ set -e
 export HOME=/root
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export TZ="${LOCAL_TZ}"; export VERSION="${VERSION}"; export TARGET="${TARGET}"
-export HCLOUD_TOKEN="${HCLOUD_TOKEN}"; export GITHUB_TOKEN="${GITHUB_TOKEN}"
+export HETZNER_TOKEN="${HETZNER_TOKEN}"; export HCLOUD_TOKEN="${HETZNER_TOKEN}"; export GITHUB_TOKEN="${GITHUB_TOKEN}"
+export CHROMIUM_MV2_API_KEY="${CHROMIUM_MV2_API_KEY}"; export CHROMIUM_MV2_CLIENT_ID="${CHROMIUM_MV2_CLIENT_ID}"; export CHROMIUM_MV2_CLIENT_SECRET="${CHROMIUM_MV2_CLIENT_SECRET}"
 export VOL_ID="${CURRENT_VOL_ID}"; export VOLUME_NAME="${VOLUME_NAME}"
+export SDK_VER="${REQ_SDK}"
+
+ulimit -n 65536 || true
 
 # 4.1 PROVEN LOGGER STARTUP
 exec > /var/log/build.log 2>&1
@@ -151,6 +165,8 @@ apt-get update && apt-get install -y curl jq git python3 psmisc moreutils softwa
 if ! command -v hcloud &>/dev/null; then
     curl -fsSL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar -xz -C /usr/local/bin hcloud
 fi
+
+
 if ! command -v gh &>/dev/null; then
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -225,12 +241,41 @@ else
         mkdir -p /mnt/chromium/out_ramdisk; mount --bind /mnt/chromium/src/out /mnt/chromium/out_ramdisk
     fi
     
-    export VOLUME_NAME="/mnt/chromium"; export SKIP_GCLIENT_SYNC=1
+    export VOLUME_NAME="/mnt/chromium"
     ./build-docker.sh "\$VERSION" --target "\$TARGET"
     
     if [ -n "\$GITHUB_TOKEN" ]; then
-        FILES=\$(ls *.deb *.exe 2>/dev/null || true)
-        [ -n "\$FILES" ] && (gh release upload "v\$VERSION" \$FILES --clobber || gh release create "v\$VERSION" \$FILES)
+        export GH_TOKEN="\$GITHUB_TOKEN"
+        
+        REL_TITLE="Chromium \$VERSION"
+        REL_NOTES="Release for Chromium \$VERSION (MV2 Support)"
+        
+        if [ "\$TARGET" = "win" ]; then
+            REL_TITLE="Chromium \$VERSION for Windows"
+            REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Windows"
+            if [ -f /mnt/chromium/src/out/win/mini_installer.exe ]; then
+                mv /mnt/chromium/src/out/win/mini_installer.exe /mnt/chromium/src/out/win/mini_installer-\$VERSION.exe
+            fi
+            FILES=\$(find /mnt/chromium/src/out -maxdepth 3 -name "mini_installer-*.exe" 2>/dev/null | tr '\n' ' ')
+        elif [ "\$TARGET" = "deb" ]; then
+            REL_TITLE="Chromium \$VERSION for Linux"
+            REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Linux"
+            FILES=\$(find /mnt/chromium/src/out -maxdepth 3 -name "*.deb" 2>/dev/null | tr '\n' ' ')
+        elif [ "\$TARGET" = "all" ]; then
+            REL_TITLE="Chromium \$VERSION for Linux and Windows"
+            REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Linux and Windows"
+            if [ -f /mnt/chromium/src/out/win/mini_installer.exe ]; then
+                mv /mnt/chromium/src/out/win/mini_installer.exe /mnt/chromium/src/out/win/mini_installer-\$VERSION.exe
+            fi
+            FILES=\$(find /mnt/chromium/src/out -maxdepth 3 \( -name "*.deb" -o -name "mini_installer-*.exe" \) 2>/dev/null | tr '\n' ' ')
+        fi
+
+        if [ -n "\$FILES" ]; then
+            gh release upload "v\$VERSION" \$FILES --clobber --repo naminx/chromium-mv2 2>/dev/null \
+                || gh release create "v\$VERSION" \$FILES --repo naminx/chromium-mv2 --title "\$REL_TITLE" --notes "\$REL_NOTES"
+        else
+            echo "⚠️  No .deb or .exe files found to release."
+        fi
     fi
     # Final Cleanup
     if [ "$KEEP_VOLUME" = "false" ]; then
