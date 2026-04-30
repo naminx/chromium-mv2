@@ -17,12 +17,13 @@ usage() {
 }
 
 if [ -z "$1" ] || [[ "$1" == -* ]]; then usage; fi
-CHROMIUM_VERSION="$1"; BUILD_TARGET="all"; SETUP_ONLY="0"
+CHROMIUM_VERSION="$1"; BUILD_TARGET="all"; SETUP_ONLY="0"; REFRESH_ONLY="0"
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
         --target) BUILD_TARGET="$2"; shift 2 ;;
         --setup-only) SETUP_ONLY="1"; shift ;;
+        --refresh-patches-only) REFRESH_ONLY="1"; shift ;;
         --shallow) shift ;; # Legacy
         *) shift ;;
     esac
@@ -99,6 +100,71 @@ PYTHON
 
     if [ "$SETUP_ONLY" = "1" ]; then echo "✅ Setup Complete. Volume is Warm."; exit 0; fi
 
+    # ── Patch Refresh Mode ───────────────────────────────────────────────────
+    if [ "$REFRESH_ONLY" = "1" ]; then
+        REFRESH_VERSION="$CHROMIUM_VERSION"
+        PATCHES_DIR="${SCRIPT_DIR}/patches"
+        SRC_DIR="$VOLUME_NAME/src"
+        [ -d "$SRC_DIR/.git" ] || { echo "❌ No src/.git found. Run a sync first."; exit 1; }
+
+        echo "🔄 Refreshing patches for Chromium $REFRESH_VERSION..."
+
+        # Collect all files touched by our patches
+        TOUCHED=$(for p in "$PATCHES_DIR"/*.patch; do
+            grep '^+++ b/' "$p" | sed 's|^+++ b/||'
+        done | sort -u)
+        echo "📋 Files affected by patches:"; echo "$TOUCHED" | sed 's/^/  /'
+
+        cd "$SRC_DIR"
+        echo "📥 Sparse-fetching $REFRESH_VERSION (no build will run)..."
+        git fetch origin "refs/tags/$REFRESH_VERSION" --depth=1 --no-tags --quiet
+
+        FAILED=0
+        for p in "$PATCHES_DIR"/*.patch; do
+            [ -f "$p" ] || continue
+            PNAME=$(basename "$p")
+            # Files this specific patch touches
+            P_FILES=$(grep '^+++ b/' "$p" | sed 's|^+++ b/||' | tr '\n' ' ')
+
+            # Stage the new version as the baseline for this patch's files
+            git checkout FETCH_HEAD -- $P_FILES 2>/dev/null
+
+            echo -n "  🩹 $PNAME ... "
+            # Try clean apply to index only (WT stays at new-version baseline)
+            if git apply --cached "$p" 2>/dev/null; then
+                MODE="clean"
+            elif git apply --cached --3way "$p" 2>/dev/null; then
+                MODE="3way"
+            else
+                MODE="fail"
+            fi
+
+            if [ "$MODE" != "fail" ]; then
+                # Write patched index back to WT so we can diff vs FETCH_HEAD
+                git checkout-index -f -- $P_FILES
+                # FETCH_HEAD (baseline) vs WT (patched) = the refreshed patch
+                git diff FETCH_HEAD -- $P_FILES > "$p"
+                # Restore WT and index to new-version baseline
+                git checkout FETCH_HEAD -- $P_FILES 2>/dev/null
+                echo "✅ ($MODE)"
+            else
+                # Apply with 3way to get conflict markers in WT for manual fix
+                git apply --3way "$p" 2>/dev/null || true
+                echo "❌ CONFLICT — fix manually in:"
+                echo "     $SRC_DIR/$P_FILES"
+                echo "     Then: cd $SRC_DIR && git diff FETCH_HEAD -- $P_FILES > $p && git checkout FETCH_HEAD -- $P_FILES"
+                FAILED=$((FAILED+1))
+            fi
+        done
+
+        # Restore src to a clean baseline state
+        git checkout FETCH_HEAD -- $TOUCHED 2>/dev/null || true
+
+        [ "$FAILED" -gt 0 ] && echo "❌ $FAILED patch(es) need manual fixing." && exit 1
+        echo "✅ All patches refreshed. Verify the diffs in ${PATCHES_DIR}/ before committing."
+        exit 0
+    fi
+
     # 1.4 Recurse into Docker
     echo "🚀 Launching build engine..."
     docker run --rm -i \
@@ -134,8 +200,10 @@ ulimit -n 65536 || true
 cd src
 echo "🧹 Cleaning and Patching..."
 git reset --hard HEAD 2>/dev/null || true; git clean -fd 2>/dev/null || true
-for p in /patches/*.patch; do 
-    [ -f "$p" ] && echo "  🩹 Applying: $(basename "$p")" && patch -p1 --forward --batch < "$p" || true
+for p in /patches/*.patch; do
+    [ -f "$p" ] || continue
+    echo "  🩹 Applying: $(basename "$p")"
+    git apply "$p"
 done
 
 if [ -n "$CHROMIUM_MV2_API_KEY" ]; then

@@ -4,12 +4,12 @@ set -e
 
 # --- Configuration ---
 VOLUME_NAME="chromium-mv2-src-vol"
-VOLUME_SIZE=150
+VOLUME_SIZE=100
 PRIMARY_LOC="hel1"
 IMAGE="ubuntu-22.04"
 
 usage() {
-    echo "Usage: $0 <VERSION> --target <deb|win> [options]"
+    echo "Usage: $0 <VERSION> --target <deb|win|all> [options]"
     echo ""
     echo "Environment Variables (Required):"
     echo "  HETZNER_TOKEN       Hetzner Cloud API Token"
@@ -23,6 +23,7 @@ usage() {
     echo "Options:"
     echo "  --cleanup             Nuclear: Delete ALL build servers and volumes"
     echo "  --remove-volume       Delete volume after success"
+    echo "  --remove-beast        Delete beast server after success"
     echo "  --cheap               Use cheap servers (cx23) for integrated test"
     echo "  --reuse-seed <IP>     Reuse existing Manager server"
     echo "  --reuse-beast <IP>    Rescue Mode: Resume build on existing server"
@@ -32,6 +33,7 @@ usage() {
 [ -z "$1" ] && [ "$1" != "--cleanup" ] && usage
 VERSION="$1"; [ "$VERSION" != "--cleanup" ] && shift || VERSION=""
 TARGET=""; KEEP_VOLUME=true; CHEAP_MODE=false; REUSE_BEAST_IP=""; REUSE_SEED_IP=""
+REMOVE_BEAST=false
 DO_CLEANUP=false
 
 while [ $# -gt 0 ]; do
@@ -39,6 +41,7 @@ while [ $# -gt 0 ]; do
         --cleanup) DO_CLEANUP=true; shift ;;
         --target) TARGET="$2"; shift 2 ;;
         --remove-volume) KEEP_VOLUME=false; shift ;;
+        --remove-beast) REMOVE_BEAST=true; shift ;;
         --cheap) CHEAP_MODE=true; shift ;;
         --reuse-seed) REUSE_SEED_IP="$2"; shift 2 ;;
         --reuse-beast) REUSE_BEAST_IP="$2"; shift 2 ;;
@@ -152,7 +155,7 @@ export TZ="${LOCAL_TZ}"; export VERSION="${VERSION}"; export TARGET="${TARGET}"
 export HETZNER_TOKEN="${HETZNER_TOKEN}"; export HCLOUD_TOKEN="${HETZNER_TOKEN}"; export GITHUB_TOKEN="${GITHUB_TOKEN}"
 export CHROMIUM_MV2_API_KEY="${CHROMIUM_MV2_API_KEY}"; export CHROMIUM_MV2_CLIENT_ID="${CHROMIUM_MV2_CLIENT_ID}"; export CHROMIUM_MV2_CLIENT_SECRET="${CHROMIUM_MV2_CLIENT_SECRET}"
 export VOL_ID="${CURRENT_VOL_ID}"; export VOLUME_NAME="${VOLUME_NAME}"
-export SDK_VER="${REQ_SDK}"
+export SDK_VER="${REQ_SDK}"; export REMOVE_BEAST="${REMOVE_BEAST}"
 
 ulimit -n 65536 || true
 
@@ -188,7 +191,7 @@ systemctl start docker
 # WHY: Size-based discovery is the only reliable way to find the disk in a cloud loop.
 VOL_DEV=""
 for i in {1..12}; do
-    VOL_DEV="/dev/\$(lsblk -dno NAME,SIZE | grep '150G' | awk '{print \$1}' | head -n 1)"
+    VOL_DEV="/dev/\$(lsblk -dno NAME,SIZE | grep '100G' | awk '{print \$1}' | head -n 1)"
     [ -n "\$VOL_DEV" ] && [ "\$VOL_DEV" != "/dev/" ] && break
     sleep 5
 done
@@ -216,7 +219,7 @@ grep -q "/mnt/chromium/.swapfile" /proc/swaps || swapon /mnt/chromium/.swapfile 
 cd /mnt/chromium
 if [ -f "/tmp/build-docker.sh" ]; then
     mv /tmp/build-docker.sh build-docker.sh; chmod +x build-docker.sh
-    [ -d "/tmp/patches" ] && (cp -r /tmp/patches/* patches/ 2>/dev/null || true)
+    [ -d "/tmp/patches" ] && (mkdir -p patches && cp -r /tmp/patches/. patches/ 2>/dev/null || true)
 fi
 
 # 4.6 DELEGATION (Single Source of Truth)
@@ -242,40 +245,52 @@ else
     fi
     
     export VOLUME_NAME="/mnt/chromium"
-    ./build-docker.sh "\$VERSION" --target "\$TARGET"
-    
-    if [ -n "\$GITHUB_TOKEN" ]; then
+    do_release() {
+        local TGT="\$1"
+        if [ -z "\$GITHUB_TOKEN" ]; then return 0; fi
         export GH_TOKEN="\$GITHUB_TOKEN"
         
-        REL_TITLE="Chromium \$VERSION"
-        REL_NOTES="Release for Chromium \$VERSION (MV2 Support)"
+        local REL_TITLE="Chromium \$VERSION"
+        local REL_NOTES="Release for Chromium \$VERSION (MV2 Support)"
+        local FILES=""
         
-        if [ "\$TARGET" = "win" ]; then
+        if [ "\$TGT" = "win" ]; then
             REL_TITLE="Chromium \$VERSION for Windows"
             REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Windows"
             if [ -f /mnt/chromium/src/out/win/mini_installer.exe ]; then
                 mv /mnt/chromium/src/out/win/mini_installer.exe /mnt/chromium/src/out/win/mini_installer-\$VERSION.exe
             fi
             FILES=\$(find /mnt/chromium/src/out -maxdepth 3 -name "mini_installer-*.exe" 2>/dev/null | tr '\n' ' ')
-        elif [ "\$TARGET" = "deb" ]; then
+        elif [ "\$TGT" = "deb" ]; then
             REL_TITLE="Chromium \$VERSION for Linux"
             REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Linux"
             FILES=\$(find /mnt/chromium/src/out -maxdepth 3 -name "*.deb" 2>/dev/null | tr '\n' ' ')
-        elif [ "\$TARGET" = "all" ]; then
-            REL_TITLE="Chromium \$VERSION for Linux and Windows"
-            REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Linux and Windows"
-            if [ -f /mnt/chromium/src/out/win/mini_installer.exe ]; then
-                mv /mnt/chromium/src/out/win/mini_installer.exe /mnt/chromium/src/out/win/mini_installer-\$VERSION.exe
-            fi
-            FILES=\$(find /mnt/chromium/src/out -maxdepth 3 \( -name "*.deb" -o -name "mini_installer-*.exe" \) 2>/dev/null | tr '\n' ' ')
         fi
 
         if [ -n "\$FILES" ]; then
+            if [ "\$TARGET" = "all" ]; then
+                REL_TITLE="Chromium \$VERSION for Linux and Windows"
+                REL_NOTES="Release for Chromium \$VERSION (MV2 Support) for Linux and Windows"
+            fi
+            
             gh release upload "v\$VERSION" \$FILES --clobber --repo naminx/chromium-mv2 2>/dev/null \
                 || gh release create "v\$VERSION" \$FILES --repo naminx/chromium-mv2 --title "\$REL_TITLE" --notes "\$REL_NOTES"
         else
-            echo "⚠️  No .deb or .exe files found to release."
+            echo "⚠️  No .deb or .exe files found to release for \$TGT."
         fi
+    }
+
+    if [ "\$TARGET" = "all" ]; then
+        echo "🚀 Target is 'all'. Building and releasing deb first..."
+        ./build-docker.sh "\$VERSION" --target "deb"
+        do_release "deb"
+        
+        echo "🚀 Now building and releasing win..."
+        ./build-docker.sh "\$VERSION" --target "win"
+        do_release "win"
+    else
+        ./build-docker.sh "\$VERSION" --target "\$TARGET"
+        do_release "\$TARGET"
     fi
     # Final Cleanup
     if [ "$KEEP_VOLUME" = "false" ]; then
@@ -283,7 +298,11 @@ else
         hcloud volume detach "$VOLUME_NAME"; until [ "$(hcloud volume describe "$VOLUME_NAME" -o json | jq -r .server)" = "null" ]; do sleep 2; done
         hcloud volume delete "$VOLUME_NAME"
     fi
-    hcloud server delete \$(hostname)
+    if [ "\$REMOVE_BEAST" = "true" ]; then
+        hcloud server delete \$(hostname)
+    else
+        echo "🛡️  Keeping Beast Server alive."
+    fi
 fi
 BASH
 }
