@@ -1,0 +1,158 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 97b17f850c30d..b7ca5805a4a73 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -5856,6 +5856,7 @@ static_library("browser") {
+ 
+       # Needed for _variant_t used in browser_dm_token_storage_win.cc
+       "comsuppw.lib",
++      "winhttp.lib",
+     ]
+     sources += [
+       "accessibility/caption_settings_dialog.h",
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 1c3854d02901b..e4963df984887 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -170,6 +170,15 @@
+ #include "chrome/installer/util/install_util.h"
+ #include "components/app_launch_prefetch/app_launch_prefetch.h"
+ #include "components/os_crypt/async/browser/dpapi_key_provider.h"
++#include <windows.h>
++#include <winhttp.h>
++#include <shellapi.h>
++#include "base/json/json_reader.h"         // for base::JSONReader
++#include "base/version.h"                  // for base::Version
++#include "base/files/file_util.h"          // for base::GetTempDir, base::WriteFile
++#include "base/strings/string_util.h"      // for base::StartsWith
++#include "base/strings/utf_string_conversions.h" // for base::UTF8ToWide
++#include "chrome/common/chrome_version.h"  // for CHROME_VERSION_STRING
+ #elif BUILDFLAG(IS_MAC)
+ #include "chrome/browser/chrome_browser_main_mac.h"
+ #include "chrome/browser/media/webrtc/system_media_capture_permissions_stats_mac.h"
+@@ -821,6 +830,79 @@ void RequestProxyResolvingSocketFactory(
+ 
+ }  // namespace
+ 
++#if BUILDFLAG(IS_WIN)
++// ── GitHub Auto-Update Helper ──────────────────────────────────────────
++void DoGitHubUpdateCheck() {
++  static bool update_in_progress = false;
++  if (update_in_progress) return;
++  update_in_progress = true;
++
++  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++    base::BindOnce([]() -> std::optional<std::wstring> {
++      auto WinHttpGet = [](const wchar_t* host, const wchar_t* path) -> std::optional<std::string> {
++        HINTERNET session = WinHttpOpen(L"ChromiumMV2-Updater/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
++        if (!session) return std::nullopt;
++        HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
++        HINTERNET request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
++        const wchar_t* headers = L"Accept: application/vnd.github+json\r\n" L"X-GitHub-Api-Version: 2022-11-28\r\n";
++        std::string body;
++        if (WinHttpSendRequest(request, headers, -1L, NULL, 0, 0, 0) && WinHttpReceiveResponse(request, NULL)) {
++          DWORD avail = 0;
++          while (WinHttpQueryDataAvailable(request, &avail) && avail > 0) {
++            std::vector<char> buf(avail);
++            DWORD read = 0;
++            if (WinHttpReadData(request, buf.data(), avail, &read)) body.append(buf.data(), read);
++          }
++        }
++        if (request) WinHttpCloseHandle(request);
++        if (connect) WinHttpCloseHandle(connect);
++        if (session) WinHttpCloseHandle(session);
++        return body.empty() ? std::nullopt : std::make_optional(body);
++      };
++
++      auto body = WinHttpGet(L"api.github.com", L"/repos/naminx/chromium-mv2/releases/latest");
++      if (!body) return std::nullopt;
++      auto parsed = base::JSONReader::ReadAndReturnValueWithError(*body, base::JSON_PARSE_RFC);
++      if (!parsed.has_value() || !parsed->is_dict()) return std::nullopt;
++
++      const auto& root = parsed->GetDict();
++      const std::string* tag = root.FindString("tag_name");
++      const base::ListValue* assets = root.FindList("assets");
++      if (!tag || !assets) return std::nullopt;
++
++      if (base::Version((*tag)[0] == 'v' ? tag->substr(1) : *tag) <= base::Version(CHROME_VERSION_STRING)) return std::nullopt;
++
++      for (const auto& asset_val : *assets) {
++        const auto& asset = asset_val.GetDict();
++        const std::string* name = asset.FindString("name");
++        const std::string* dl_url = asset.FindString("browser_download_url");
++        if (name && dl_url && base::StartsWith(*name, "chromium-mv2-")) {
++          base::FilePath temp_dir;
++          if (!base::GetTempDir(&temp_dir)) return std::nullopt;
++          base::FilePath dest = temp_dir.Append(L"chrome_update.exe");
++
++          URL_COMPONENTS comps = { sizeof(comps), NULL, 0, INTERNET_SCHEME_HTTPS, NULL, 0, 0, NULL, 0, NULL, 0, NULL, 0 };
++          wchar_t host[256], upath[2048];
++          comps.lpszHostName = host; comps.dwHostNameLength = 256;
++          comps.lpszUrlPath = upath; comps.dwUrlPathLength = 2048;
++
++          if (WinHttpCrackUrl(base::UTF8ToWide(*dl_url).c_str(), 0, 0, &comps)) {
++            auto bin = WinHttpGet(host, upath);
++            if (bin && base::WriteFile(dest, *bin)) return dest.value();
++          }
++        }
++      }
++      return std::nullopt;
++    }),
++    base::BindOnce([](std::optional<std::wstring> path) {
++      update_in_progress = false;
++      if (!path) return;
++      SHELLEXECUTEINFO sei = { sizeof(sei), SEE_MASK_NOCLOSEPROCESS, NULL, L"open", path->c_str(), L"--do-not-launch-chrome", NULL, SW_HIDE };
++      ShellExecuteExW(&sei);
++    }));
++}
++#endif
++
+ void BrowserProcessImpl::FlushLocalStateAndReply(base::OnceClosure reply) {
+   local_state_->CommitPendingWrite(std::move(reply));
+ }
+@@ -1670,6 +1752,11 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+     features_->audio_process_ml_model_forwarder()->Initialize(
+         features_->optimization_guide_global_feature()->GetModelProvider());
+   }
++
++#if BUILDFLAG(IS_WIN)
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE, base::BindOnce(&DoGitHubUpdateCheck), base::Minutes(5));
++#endif
+ }
+ 
+ void BrowserProcessImpl::CreateIconManager() {
+diff --git a/chrome/browser/browser_process_impl.h b/chrome/browser/browser_process_impl.h
+index b1a1a39d3decd..907597fb3488e 100644
+--- a/chrome/browser/browser_process_impl.h
++++ b/chrome/browser/browser_process_impl.h
+@@ -517,4 +517,8 @@ class BrowserProcessImpl : public BrowserProcess,
+   SEQUENCE_CHECKER(sequence_checker_);
+ };
+ 
++#if BUILDFLAG(IS_WIN)
++void DoGitHubUpdateCheck();
++#endif
++
+ #endif  // CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
+diff --git a/chrome/browser/ui/webui/settings/about_handler.cc b/chrome/browser/ui/webui/settings/about_handler.cc
+index 17a72c6c1030f..a91d1f4337d14 100644
+--- a/chrome/browser/ui/webui/settings/about_handler.cc
++++ b/chrome/browser/ui/webui/settings/about_handler.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/ui/webui/settings/about_handler.h"
++#include "chrome/browser/browser_process_impl.h"
+ 
+ #include <stddef.h>
+ 
+@@ -500,6 +501,8 @@ void AboutHandler::RefreshUpdateStatus() {
+   static_cast<VersionUpdaterCros*>(version_updater_.get())
+       ->GetUpdateStatus(base::BindRepeating(&AboutHandler::SetUpdateStatus,
+                                             weak_factory_.GetWeakPtr()));
++#elif BUILDFLAG(IS_WIN)
++  DoGitHubUpdateCheck();
+ #else
+   RequestUpdate();
+ #endif

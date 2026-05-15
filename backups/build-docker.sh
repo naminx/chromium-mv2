@@ -1,773 +1,586 @@
 #!/usr/bin/env bash
-# build-docker.sh — Cross-compile Chromium for Windows using Docker/Podman.
+# build-docker.sh — The Chromium Build Engine (Proven Single Source)
 #
-# Usage:
-#   ./build-docker.sh <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow]
-#   ./build-docker.sh 145.0.7632.116
-#
-# Options:
-#   --from-cache <PREV>  Explicitly set the previous Chromium version. Needed for
-#                        correct incremental time stamps when restoring external cache.
-#   --shallow            Use shallow git clone to save time and disk space.
-#
-# Produces: mini_installer.exe (Windows x64 installer)
-#
-# On the first run, this fetches the full Chromium source (~30 GB) and builds
-# from scratch. Subsequent runs only recompile changed files (minutes, not hours).
-#
-# The source tree and build artefacts are stored in a named Docker volume
-# (chromium-mv2-src) that persists between script invocations.
-
+# This script is a Two-Phase State Machine:
+# PHASE 1: Host-Side Preparation (Sync, Toolchains, Memory Resilience)
+# PHASE 2: Container-Side Compilation (Patches, GN, Ninja)
 set -e
 
+# --- Configuration ---
+IMAGE_NAME="chromium-mv2-builder-v13"
+VOLUME_NAME="${VOLUME_NAME:-chromium-mv2-src}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Detect and set local timezone for logging
+export TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
+
+# Enable logging with timestamps if running on host
+if [ ! -f /.dockerenv ]; then
+    LOG_FILE="build.log"
+    if command -v ts >/dev/null 2>&1; then
+        exec > >(ts '[%Y-%m-%d %H:%M:%S]' | tee "$LOG_FILE") 2>&1
+    else
+        exec > >(tee "$LOG_FILE") 2>&1
+    fi
+    echo "--- Build Script Started on Host ---"
+fi
+
 usage() {
-    echo "Usage: $0 <CHROMIUM_VERSION> [--from-cache <PREV>] [--shallow] [--target <TARGET>]"
-    echo ""
-    echo "Options:"
-    echo "  --from-cache <PREV>  Explicitly set the previous Chromium version. Needed for"
-    echo "                       correct incremental time stamps when restoring external cache."
-    echo "  --shallow            Use shallow git clone to save time and disk space."
-    echo "  --target <TARGET>    Target platform to build: 'deb', 'win', or 'all' (default: all)."
-    echo ""
-    echo "Example:"
-    echo "  $0 145.0.7632.116 --target win"
+    echo "Usage: $0 <VERSION> [--target <deb|win|all>] [--setup-only] [--no-release] [--full-sync] [--clean]"
     exit 1
 }
 
-if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [[ "$1" == -* ]]; then
-    usage
-fi
-
-CHROMIUM_VERSION="$1"
-SHALLOW_CLONE="0"
-FROM_CACHE_VERSION=""
-BUILD_TARGET="all"
-
+if [ -z "$1" ] || [[ "$1" == -* ]]; then usage; fi
+CHROMIUM_VERSION="$1"; BUILD_TARGET="all"; SETUP_ONLY="0"; REFRESH_ONLY="0"; NO_RELEASE="${NO_RELEASE:-0}"; FULL_SYNC="0"; CLEAN_BUILD="0"
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
-        --shallow)
-            SHALLOW_CLONE="1"
-            shift
-            ;;
-        --from-cache)
-            FROM_CACHE_VERSION="$2"
-            shift 2
-            ;;
-        --target)
-            BUILD_TARGET="$2"
-            shift 2
-            ;;
-        *)
-            shift
-            ;;
+        --target) BUILD_TARGET="$2"; shift 2 ;;
+        --setup-only) SETUP_ONLY="1"; shift ;;
+        --no-release) NO_RELEASE="1"; shift ;;
+        --full-sync) FULL_SYNC="1"; shift ;;
+        --clean) CLEAN_BUILD="1"; shift ;;
+        --refresh-patches-only) REFRESH_ONLY="1"; shift ;;
+        --shallow) shift ;; # Legacy
+        *) shift ;;
     esac
 done
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PATCHES_DIR="$SCRIPT_DIR/patches"
-IMAGE_NAME="chromium-mv2-builder-v12"
-VOLUME_NAME="${VOLUME_NAME:-chromium-mv2-src}"
 
-# Prefer docker (already installed); fall back to podman.
-if command -v docker &>/dev/null; then
-    DOCKER=docker
-    echo "🐳 Using Docker"
-elif command -v podman &>/dev/null; then
-    DOCKER=podman
-    echo "🐳 Using Podman (rootless)"
-else
-    echo "❌ Neither docker nor podman found. Install one and retry."
-    exit 1
-fi
-
-# ── Build the base image (cached after first run) ────────────────────────────
-echo "📦 Ensuring base image '$IMAGE_NAME' exists..."
-if ! $DOCKER image inspect "$IMAGE_NAME" &>/dev/null; then
-    echo "🔨 Building base image (first time only — installs Chromium build deps)..."
-    $DOCKER build --tag "$IMAGE_NAME" - << 'DOCKERFILE'
+# ── PHASE 1: Data Preparation (Runs on Host for Speed) ───────────────────────
+if [ ! -f /.dockerenv ]; then
+    # 1.1 Ensure Docker Image exists
+    if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+        echo "🔨 Building base image..."
+        docker build --tag "$IMAGE_NAME" - << 'DOCKERFILE'
 FROM docker.io/library/ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
-LABEL description="Chromium incremental build environment"
-
-# Core tools first (small layer)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN <<APT
+apt-get update && apt-get install -y --no-install-recommends \
     git curl wget sudo lsb-release file ca-certificates \
     python3 python-is-python3 python3-httplib2 \
+    tzdata \
     fuse libfuse2 ciopfs unzip p7zip-full pkg-config binutils rpm dpkg-dev patch gperf git-restore-mtime \
-    devscripts fakeroot \
-    && rm -rf /var/lib/apt/lists/*
-
-# depot_tools (contains gclient, fetch, gn)
-RUN git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /depot_tools
+    devscripts fakeroot moreutils software-properties-common less && \
+add-apt-repository ppa:neovim-ppa/unstable -y && \
+apt-get update && apt-get install -y --no-install-recommends \
+    fish neovim ripgrep fd-find bat && rm -rf /var/lib/apt/lists/*
+APT
+RUN <<EZA
+mkdir -p /etc/apt/keyrings
+wget -qO- https://raw.githubusercontent.com/eza-community/eza/main/deb.asc | gpg --dearmor -o /etc/apt/keyrings/gierens.gpg
+echo "deb [signed-by=/etc/apt/keyrings/gierens.gpg] http://deb.gierens.de stable main" | tee /etc/apt/sources.list.d/gierens.list
+apt-get update && apt-get install -y eza && rm -rf /var/lib/apt/lists/*
+EZA
+RUN ln -s /usr/bin/fdfind /usr/local/bin/fd && ln -s /usr/bin/batcat /usr/local/bin/bat
+RUN <<GH
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/etc/apt/keyrings/githubcli-archive-keyring.gpg
+chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+GH
+RUN <<APT
+git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /depot_tools
+APT
 ENV PATH="/depot_tools:$PATH"
-
-# Bootstrap depot_tools so that python3_bin_reldir.txt is created.
-# Without this gn/gclient wrappers fail with "not initialized".
-# DEPOT_TOOLS_UPDATE=0 is NOT set here so the bootstrap is allowed to run.
 RUN DEPOT_TOOLS_METRICS=0 /depot_tools/update_depot_tools
-
-# Tell gclient not to prompt, and disable auto-update of depot_tools inside CI
 ENV DEPOT_TOOLS_UPDATE=0
 ENV DEPOT_TOOLS_METRICS=0
-
 WORKDIR /chromium
 DOCKERFILE
-    echo "✅ Base image built!"
-else
-    echo "✅ Base image already exists. Skipping build."
-fi
-
-# ── Ensure the source volume exists ──────────────────────────────────────────
-$DOCKER volume create "$VOLUME_NAME" > /dev/null 2>&1 || true
-
-# ── Run the incremental build inside the container ───────────────────────────
-echo ""
-echo "🚀 Launching build container for Chromium $CHROMIUM_VERSION..."
-echo "   Source volume : $VOLUME_NAME (persistent)"
-echo "   Patches dir   : $PATCHES_DIR"
-[ -d "${SCRIPT_DIR}/out_ramdisk" ] && echo "   Artifacts     : RAM disk (host-side, persistent)"
-echo ""
-
-$DOCKER run --rm -i \
-    --name "chromium-mv2-build-$(date +%s)" \
-    --network host \
-    --device /dev/fuse \
-    --cap-add SYS_ADMIN \
-    --security-opt apparmor:unconfined \
-    --ulimit nofile=65536:65536 \
-    -v "${VOLUME_NAME}:/chromium" \
-    -v "${PATCHES_DIR}:/patches:ro" \
-    -v "${SCRIPT_DIR}:/host_out" \
-    $( [ -d "${SCRIPT_DIR}/out_ramdisk" ] && echo "-v ${SCRIPT_DIR}/out_ramdisk:/chromium/src/out" ) \
-    -e "CHROMIUM_VERSION=${CHROMIUM_VERSION}" \
-    -e "TOOLCHAIN_PASS=${TOOLCHAIN_PASS}" \
-    -e "SHALLOW_CLONE=${SHALLOW_CLONE}" \
-    -e "BUILD_TARGET=${BUILD_TARGET}" \
-    -e "FROM_CACHE_VERSION=${FROM_CACHE_VERSION}" \
-    -e "PATH=/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    -e "DEPOT_TOOLS_UPDATE=1" \
-    -e "DEPOT_TOOLS_METRICS=0" \
-    -e "GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1" \
-    -e "SKIP_GCLIENT_SYNC=${SKIP_GCLIENT_SYNC}" \
-    -e "VPYTHON_VENV_ROOT=${VPYTHON_VENV_ROOT}" \
-    -e "PIP_CACHE_DIR=${PIP_CACHE_DIR}" \
-    "$IMAGE_NAME" bash << 'INNER'
-set -e
-
-# Chromium's parallel build + ciopfs FUSE easily exhaust the default fd limit.
-ulimit -n 65536 2>/dev/null || true
-
-# ── Git Optimizations (for 192GB RAM) ────────────────────────────────────────
-echo "🚀 Optimizing Git for high-performance networking/RAM..."
-git config --global core.deltaBaseCacheLimit 2G
-git config --global core.preloadIndex true
-git config --global core.fscache true
-git config --global http.postBuffer 1G
-git config --global pack.threads 0
-git config --global index.threads 0
-
-echo "════════════════════════════════════════════════════"
-echo " Target: Chromium $CHROMIUM_VERSION"
-echo "════════════════════════════════════════════════════"
-
-cd /chromium
-
-# ── Windows Toolchain Setup ──────────────────────────────────────────────────
-TOOLCHAIN_ROOT="/chromium/win_toolchain"
-HASH="42b5b0689e"
-TOOLCHAIN_DEST="$TOOLCHAIN_ROOT/vs_files/$HASH"
-
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
-    # If we have lots of RAM, use tmpfs for the toolchain to speed up extraction
-    TOTAL_MEM_KB=$(awk '/MemTotal/{print $2}' /proc/meminfo)
-    if [ "$TOTAL_MEM_KB" -gt 64000000 ] && ! mountpoint -q "$TOOLCHAIN_ROOT"; then
-        echo "🚀 High RAM detected, mounting 10GB tmpfs for toolchain..."
-        mkdir -p "$TOOLCHAIN_ROOT"
-        mount -t tmpfs -o size=10G tmpfs "$TOOLCHAIN_ROOT" || echo "⚠️  Failed to mount tmpfs."
     fi
 
-    # 1. Mount ciopfs (required for case-insensitive headers on Linux)
-    mkdir -p "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files"
+    # 1.2 Host-Side Sync (EXACT REPRODUCTION OF PROVEN MONOLITH)
+    IS_DOCKER_VOLUME=0
+    if docker volume inspect "$VOLUME_NAME" &>/dev/null; then
+        IS_DOCKER_VOLUME=1
+        echo "📦 Detected Docker Volume: $VOLUME_NAME"
+    fi
+
+    if [ "$IS_DOCKER_VOLUME" = "0" ]; then
+        cd "$VOLUME_NAME"
+        if [ "$SKIP_GCLIENT_SYNC" != "1" ]; then
+            if [ ! -d "depot_tools" ]; then 
+                echo "📥 Installing depot_tools..."
+                git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools
+            fi
+            export PATH="$(pwd)/depot_tools:$PATH"
+            export GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1
+
+            echo "📝 Configuring Universal .gclient..."
+            cat > .gclient << 'PYTHON'
+solutions = [ { "name": "src", "url": "https://chromium.googlesource.com/chromium/src.git", "managed": False, "custom_deps": {}, "custom_vars": {}, } ]
+target_os = ["win", "linux"]
+PYTHON
+
+            # THE FAST PATH (WHY): Raw git clone --progress is the only way to get a
+            # scrolling status light in the terminal. gclient sync is silent for 
+            # the first 30GB, which looks like a hang in cloud logs.
+            GIT_DEPTH="--depth 1"
+            [ "$FULL_SYNC" = "1" ] && GIT_DEPTH=""
+            
+            if [ ! -d "src" ]; then 
+                echo "🚀 Performing high-speed manual clone of src tag $CHROMIUM_VERSION..."
+                git clone $GIT_DEPTH --branch "$CHROMIUM_VERSION" --progress https://chromium.googlesource.com/chromium/src.git
+            else 
+                echo "🚀 Performing high-speed manual fetch of src tag $CHROMIUM_VERSION..."
+                git -C src reset --hard HEAD 2>/dev/null || true
+                git -C src clean -fd 2>/dev/null || true
+                git -C src fetch origin "refs/tags/$CHROMIUM_VERSION" $GIT_DEPTH --progress && git -C src checkout FETCH_HEAD
+            fi
+
+            echo "📥 Syncing dependencies (Universal)..."
+            # EXACT FLAGS from backups/build-hetzner.sh
+            # Added -D to reclaim disk space by removing orphaned directories
+            GCLIENT_SYNC_FLAGS="-D --nohooks --verbose -j$(nproc)"
+            if [ "$FULL_SYNC" = "0" ]; then
+                GCLIENT_SYNC_FLAGS="$GCLIENT_SYNC_FLAGS --no-history --shallow"
+            fi
+            gclient sync $GCLIENT_SYNC_FLAGS
+            
+            # 1.3 SAFE TOOLCHAIN SEQUENCE (WHY):
+            # We MUST set WIN_TOOLCHAIN=0 during runhooks to prevent 401 Unauthorized
+            # errors from Google's private SDK storage. We then manually update clang.
+            echo "🛠️  Updating gclient hooks..."
+            export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+            gclient runhooks
+            echo "🔧 Updating Clang..."
+            python3 src/tools/clang/scripts/update.py
+        fi
+        if [ "$SETUP_ONLY" = "1" ]; then echo "✅ Setup Complete. Volume is Warm."; exit 0; fi
+    else
+        echo "⏭️ Skipping host-side sync for Docker Volume."
+    fi
+
+    # ── Patch Refresh Mode (Host Only) ───────────────────────────────────────
+    if [ "$REFRESH_ONLY" = "1" ]; then
+        [ "$IS_DOCKER_VOLUME" = "1" ] && { echo "❌ --refresh-patches-only not supported with Docker Volumes yet."; exit 1; }
+        REFRESH_VERSION="$CHROMIUM_VERSION"
+        PATCHES_DIR="${SCRIPT_DIR}/patches"
+        SRC_DIR="$VOLUME_NAME/src"
+        [ -d "$SRC_DIR/.git" ] || { echo "❌ No src/.git found. Run a sync first."; exit 1; }
+
+        echo "🔄 Refreshing patches for Chromium $REFRESH_VERSION..."
+
+        # Collect all files touched by our patches
+        TOUCHED=$(for p in "$PATCHES_DIR"/*.patch; do
+            grep '^+++ b/' "$p" | sed 's|^+++ b/||'
+        done | sort -u)
+        echo "📋 Files affected by patches:"; echo "$TOUCHED" | sed 's/^/  /'
+
+        cd "$SRC_DIR"
+        echo "📥 Sparse-fetching $REFRESH_VERSION (no build will run)..."
+        git fetch origin "refs/tags/$REFRESH_VERSION" --depth=1 --no-tags --quiet
+
+        FAILED=0
+        for p in "$PATCHES_DIR"/*.patch; do
+            [ -f "$p" ] || continue
+            PNAME=$(basename "$p")
+            # Files this specific patch touches
+            P_FILES=$(grep '^+++ b/' "$p" | sed 's|^+++ b/||' | tr '\n' ' ')
+
+            # Stage the new version as the baseline for this patch's files
+            git checkout FETCH_HEAD -- $P_FILES 2>/dev/null
+
+            echo -n "  🩹 $PNAME ... "
+            # Try clean apply to index only (WT stays at new-version baseline)
+            if git apply --cached "$p" 2>/dev/null; then
+                MODE="clean"
+            elif git apply --cached --3way "$p" 2>/dev/null; then
+                MODE="3way"
+            else
+                MODE="fail"
+            fi
+
+            if [ "$MODE" != "fail" ]; then
+                # Write patched index back to WT so we can diff vs FETCH_HEAD
+                git checkout-index -f -- $P_FILES
+                # FETCH_HEAD (baseline) vs WT (patched) = the refreshed patch
+                git diff FETCH_HEAD -- $P_FILES > "$p"
+                # Restore WT and index to new-version baseline
+                git checkout FETCH_HEAD -- $P_FILES 2>/dev/null
+                echo "✅ ($MODE)"
+            else
+                # Apply with 3way to get conflict markers in WT for manual fix
+                git apply --3way "$p" 2>/dev/null || true
+                echo "❌ CONFLICT — fix manually in:"
+                echo "     $SRC_DIR/$P_FILES"
+                echo "     Then: cd $SRC_DIR && git diff FETCH_HEAD -- $P_FILES > $p && git checkout FETCH_HEAD -- $P_FILES"
+                FAILED=$((FAILED+1))
+            fi
+        done
+
+        # Restore src to a clean baseline state
+        git checkout FETCH_HEAD -- $TOUCHED 2>/dev/null || true
+
+        [ "$FAILED" -gt 0 ] && echo "❌ $FAILED patch(es) need manual fixing." && exit 1
+        echo "✅ All patches refreshed. Verify the diffs in ${PATCHES_DIR}/ before committing."
+        exit 0
+    fi
+
+    # 1.4 Recurse into Docker
+    echo "🚀 Launching build engine..."
+    MOUNT_SRC="$(pwd)"
+    [ "$IS_DOCKER_VOLUME" = "1" ] && MOUNT_SRC="$VOLUME_NAME"
+
+    # Forward relevant flags
+    EXTRA_ARGS=""
+    [ "$SETUP_ONLY" = "1" ] && EXTRA_ARGS="$EXTRA_ARGS --setup-only"
+    [ "$NO_RELEASE" = "1" ] && EXTRA_ARGS="$EXTRA_ARGS --no-release"
+    [ "$FULL_SYNC" = "1" ] && EXTRA_ARGS="$EXTRA_ARGS --full-sync"
+    [ "$CLEAN_BUILD" = "1" ] && EXTRA_ARGS="$EXTRA_ARGS --clean"
+
+    docker run --rm -i \
+        --ulimit nofile=65536:65536 \
+        --network host --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
+        -v "$MOUNT_SRC:/chromium" \
+        -v "${SCRIPT_DIR}:/host_scripts" \
+        -v "${SCRIPT_DIR}/patches:/patches:ro" \
+        -v "${SCRIPT_DIR}:/host_out" \
+        $( [ -d "${SCRIPT_DIR}/out_ramdisk" ] && echo "-v ${SCRIPT_DIR}/out_ramdisk:/chromium/src/out" ) \
+        -e "VOLUME_NAME=/chromium" \
+        -e "VPYTHON_VENV_ROOT=/chromium/.cache/vpython" \
+        -e "PIP_CACHE_DIR=/chromium/.cache/pip" \
+        -e "HETZNER_TOKEN=${HETZNER_TOKEN}" \
+        -e "GITHUB_TOKEN=${GITHUB_TOKEN}" \
+        -e "TZ=${TZ}" \
+        -e "CHROMIUM_MV2_API_KEY=${CHROMIUM_MV2_API_KEY}" \
+        -e "CHROMIUM_MV2_CLIENT_ID=${CHROMIUM_MV2_CLIENT_ID}" \
+        -e "CHROMIUM_MV2_CLIENT_SECRET=${CHROMIUM_MV2_CLIENT_SECRET}" \
+        -e "SDK_VER=${SDK_VER}" \
+        -e "SETUP_ONLY=${SETUP_ONLY}" \
+        -e "NO_RELEASE=${NO_RELEASE}" \
+        -e "FULL_SYNC=${FULL_SYNC}" \
+        -e "CLEAN_BUILD=${CLEAN_BUILD}" \
+        -e "IS_LOCAL_BUILD=${IS_DOCKER_VOLUME}" \
+        "$IMAGE_NAME" bash "/host_scripts/$(basename "$0")" "$CHROMIUM_VERSION" --target "$BUILD_TARGET" $EXTRA_ARGS
+    exit $?
+fi
+
+# ── PHASE 2: Compilation (Runs inside Container) ─────────────────────────────
+set -e
+# Enable logging with timestamps (requires moreutils)
+if command -v ts >/dev/null 2>&1; then
+    exec > >(ts '[%Y-%m-%d %H:%M:%S]') 2>&1
+fi
+echo "--- Build Script Started inside Container ---"
+
+# --- Constants ---
+HASH="e66617bc68"
+# SDK_VER is used for downloading the toolchain if needed
+[ -z "$SDK_VER" ] && SDK_VER="10.0.26100.0"
+
+do_release() {
+    local TGT="$1"
+    if [ "$NO_RELEASE" = "1" ]; then echo "⏭️ Skipping release upload."; return 0; fi
+    if [ -z "$GITHUB_TOKEN" ]; then echo "⚠️ GITHUB_TOKEN not set. Skipping upload."; return 0; fi
+    export GH_TOKEN="$GITHUB_TOKEN"
+
+    local REL_TITLE="Chromium $CHROMIUM_VERSION"
+    local REL_NOTES="Release for Chromium $CHROMIUM_VERSION (MV2 Support)"
+    local FILES=""
+    
+    if [ "$TGT" = "win" ]; then
+        REL_TITLE="Chromium $CHROMIUM_VERSION for Windows"
+        REL_NOTES="Release for Chromium $CHROMIUM_VERSION (MV2 Support) for Windows"
+        # Look for both the standard name and our versioned name
+        FILES=$(ls out/win/mini_installer.exe 2>/dev/null || true)
+    elif [ "$TGT" = "deb" ]; then
+        REL_TITLE="Chromium $CHROMIUM_VERSION for Linux"
+        REL_NOTES="Release for Chromium $CHROMIUM_VERSION (MV2 Support) for Linux"
+        FILES=$(ls out/linux/chromium-browser-stable_*.deb 2>/dev/null || true)
+    fi
+
+    if [ -n "$FILES" ]; then
+        echo "🚀 Uploading $TGT artifacts to GitHub..."
+        # Try to upload to existing release first, create if fails
+        gh release upload "v$CHROMIUM_VERSION" $FILES --clobber --repo naminx/chromium-mv2 2>/dev/null \
+            || gh release create "v$CHROMIUM_VERSION" $FILES --repo naminx/chromium-mv2 --title "$REL_TITLE" --notes "$REL_NOTES"
+    else
+        echo "⚠️ No $TGT files found to release."
+    fi
+}
+
+cd "$VOLUME_NAME"
+export PATH="/depot_tools:$PATH"
+export GCLIENT_SUPPRESS_GIT_VERSION_WARNING=1
+ulimit -n 65536 || true
+
+# 2.0 Container-Side Sync (For Docker Volumes)
+# ⚠️ Smart Sync: We skip the massive source/gclient sync and hooks if already done.
+SYNC_V_FILE=".last_sync_version"
+LAST_SYNC_V=""
+[ -f "$SYNC_V_FILE" ] && LAST_SYNC_V=$(cat "$SYNC_V_FILE")
+
+if [ "$LAST_SYNC_V" = "$CHROMIUM_VERSION" ] && [ "$FULL_SYNC" = "0" ] && [ "$CLEAN_BUILD" = "0" ] && [ -d "src" ]; then
+    echo "⏭️  Smart Sync: Version $CHROMIUM_VERSION already synced. Skipping source, gclient, and Clang updates."
+else
+    GIT_DEPTH="--depth 1"
+    [ "$FULL_SYNC" = "1" ] && GIT_DEPTH=""
+
+    # Incremental Fetch with Timestamp Preservation
+    if [ ! -d "src" ]; then 
+        echo "🚀 Performing high-speed manual clone of src tag $CHROMIUM_VERSION..."
+        git clone $GIT_DEPTH --branch "$CHROMIUM_VERSION" --progress https://chromium.googlesource.com/chromium/src.git
+    else 
+        # Use .last_built_version as the baseline for the fetch-bump logic
+        CURRENT_V=""
+        [ -f .last_built_version ] && CURRENT_V=$(cat .last_built_version)
+        if [ "$CURRENT_V" != "$CHROMIUM_VERSION" ]; then
+            echo "🚀 Fetching src tag $CHROMIUM_VERSION..."
+            cd src
+            git reset --hard HEAD 2>/dev/null || true
+            git clean -fd 2>/dev/null || true
+            git fetch origin "refs/tags/$CHROMIUM_VERSION" $GIT_DEPTH --progress
+            if [ -n "$CURRENT_V" ] && git rev-parse "$CURRENT_V" >/dev/null 2>&1; then
+                echo "🕐 Identifying changed files to preserve timestamps..."
+                git -c diff.renameLimit=20000 diff --name-only --diff-filter=d "$CURRENT_V" "FETCH_HEAD" > /tmp/changed_files.txt
+            fi
+            git checkout FETCH_HEAD
+            if [ -s /tmp/changed_files.txt ]; then
+                echo "🕐 Restoring timestamps for unchanged files..."
+                tr '\n' '\0' < /tmp/changed_files.txt | xargs -0 -r touch -c || true
+                rm -f /tmp/changed_files.txt
+            fi
+            cd ..
+        fi
+    fi
+
+    echo "📥 Syncing dependencies (Universal)..."
+    GCLIENT_SYNC_FLAGS="-D --nohooks --verbose -j$(nproc)"
+    [ "$FULL_SYNC" = "0" ] && GCLIENT_SYNC_FLAGS="$GCLIENT_SYNC_FLAGS --no-history --shallow"
+    gclient sync $GCLIENT_SYNC_FLAGS
+    
+    echo "🛠️  Updating gclient hooks..."
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+    gclient runhooks
+    echo "🔧 Updating Clang..."
+    python3 src/tools/clang/scripts/update.py
+    
+    # Mark sync as successful
+    echo "$CHROMIUM_VERSION" > "$SYNC_V_FILE"
+fi
+
+if [ "$SETUP_ONLY" = "1" ]; then echo "✅ Setup Complete. Volume is Warm."; exit 0; fi
+
+# 2.1 CLEAN AND PATCH FIRST (WHY):
+# ⚠️ CAUTION: The order and logic here are critical for INCREMENTAL BUILDS.
+# 1. 'git reset' is necessary to remove previous toolchain 'sed' hacks, but it wipes mtimes.
+# 2. Ninja uses mtimes to decide what to build. If we reset without restoration,
+#    we lose 100+ CPU hours of progress (60k+ targets).
+# 3. 'vs_toolchain.py' MUST be stubbed (Update -> return 0) because 'gn gen' calls it.
+#    If it's not stubbed, 'gn' will trigger a toolchain download that fails on Linux.
+cd src
+echo "🧹 Cleaning and Patching..."
+
+if [ "$CLEAN_BUILD" = "1" ]; then
+    echo "🗑️  Performing clean build (wiping out/)..."
+    rm -rf out/*
+fi
+
+# Incremental build protection: Use state hash to avoid touching files unnecessarily
+# Added $0 (this script) to the hash so changes to patching logic trigger a re-patch
+PATCH_HASH=$(echo "$CHROMIUM_VERSION-$FULL_SYNC" $(md5sum /patches/*.patch 2>/dev/null | md5sum) $(md5sum $0 | md5sum) | md5sum | cut -d' ' -f1 || echo "no-patches")
+STATE_FILE="$VOLUME_NAME/.last_patch_state"
+CURRENT_STATE="$PATCH_HASH"
+LAST_STATE=""
+[ -f "$STATE_FILE" ] && LAST_STATE=$(cat "$STATE_FILE")
+
+    if [ "$CURRENT_STATE" != "$LAST_STATE" ] || [ "$CLEAN_BUILD" = "1" ]; then
+        echo "🔄 Change detected (Version/Patches/SyncMode/BuildScript). Resetting and re-patching..."
+        
+        # PRESERVE TIMESTAMPS (WHY): 
+        # Ninja compares Source MTime vs Object MTime.
+        # After 'git reset', all source files look "newer" than the 60k object files in out/.
+        # We use a 'sentinel' to identify the 'past'.
+        SENTINEL="/tmp/last_build_sentinel"
+        rm -f "$SENTINEL"
+        if [ -f "$VOLUME_NAME/.last_built_version" ]; then touch -r "$VOLUME_NAME/.last_built_version" "$SENTINEL"
+        elif [ -f out/linux/build.ninja ]; then touch -r out/linux/build.ninja "$SENTINEL"
+        elif [ -f out/win/build.ninja ]; then touch -r out/win/build.ninja "$SENTINEL"
+        fi
+
+        # 🚀 RECOVERY LOGIC: If the sentinel we found is too "new" (less than 1 hour old),
+        # it means the build already started and poisoned the mtime.
+        # We search for the OLDEST .obj file in the build directory to find the "True Past".
+        NOW_S=$(date +%s)
+        SENTINEL_S=$(date -r "$SENTINEL" +%s 2>/dev/null || echo 0)
+        DIFF_S=$(( NOW_S - SENTINEL_S ))
+        
+        if [ "$DIFF_S" -lt 3600 ] && [ "$CLEAN_BUILD" = "0" ]; then
+            echo "🔍 Sentinel is too new ($((DIFF_S/60))m old). Searching for recovery sentinel..."
+            # Find the oldest .obj file that is at least 1 hour old
+            TRUE_PAST=$(find out/ -name "*.obj" -mmin +60 -printf "%T+ %p\n" 2>/dev/null | sort | head -n 1 | awk '{print $2}')
+            if [ -n "$TRUE_PAST" ] && [ -f "$TRUE_PAST" ]; then
+                echo "🚑 Recovery Sentinel Found: $(basename "$TRUE_PAST") ($(date -r "$TRUE_PAST"))"
+                touch -r "$TRUE_PAST" "$SENTINEL"
+            else
+                echo "⚠️ No old object files found for recovery. Will use current sentinel."
+            fi
+        fi
+
+        # 1. Identify files that were already dirty or changed since last build
+        EXCLUDE_LIST="/tmp/exclude_files.txt"
+        : > "$EXCLUDE_LIST"
+        if [ -f "$SENTINEL" ]; then
+            echo "🕐 Identifying files changed since last build..."
+            # Files newer than sentinel (e.g. from gclient sync)
+            find . \( -path ./out -o -path ./.git \) -prune -o -type f -newer "$SENTINEL" -printf "%P\n" >> "$EXCLUDE_LIST"
+            # Files currently modified in WT
+            git status --porcelain | sed 's/^...//;s/.* -> //' >> "$EXCLUDE_LIST"
+        fi
+
+        # The Nuke
+        echo "🧹 Performing git reset --hard..."
+        git reset --hard HEAD 2>/dev/null || true
+        # ⚠️ CRITICAL: Ensure out/ is NEVER nuked. 
+        git clean -fd -e out/ 2>/dev/null || true
+        
+        echo "🩹 Applying patches..."
+        for p in /patches/*.patch; do
+            [ -f "$p" ] || continue
+            echo "  🩹 Applying: $(basename "$p")"
+            git apply "$p"
+            # Add patched files to exclude list to ensure they ARE recompiled
+            git apply --numstat "$p" | awk '{print $3}' >> "$EXCLUDE_LIST"
+        done
+
+        if [ -n "$CHROMIUM_MV2_API_KEY" ]; then
+            echo "🔑 Injecting private API keys..."
+            sed -i "s/CUSTOM_GOOGLE_API_KEY_PLACEHOLDER/$CHROMIUM_MV2_API_KEY/g" google_apis/default_api_keys.h 2>/dev/null || true
+            sed -i "s/CUSTOM_GOOGLE_CLIENT_ID_PLACEHOLDER/$CHROMIUM_MV2_CLIENT_ID/g" google_apis/default_api_keys.h 2>/dev/null || true
+            sed -i "s/CUSTOM_GOOGLE_CLIENT_SECRET_PLACEHOLDER/$CHROMIUM_MV2_CLIENT_SECRET/g" google_apis/default_api_keys.h 2>/dev/null || true
+            echo "google_apis/default_api_keys.h" >> "$EXCLUDE_LIST"
+        fi
+
+        # 2.3.2 THE DOUBLE SPOOF (WHY):
+        # ⚠️ CAUTION: 'gn gen' calls vs_toolchain.py. If we don't return 0 in Update(),
+        # it attempts to download the SDK from Google servers, which will fail here.
+        if [ -f build/vs_toolchain.py ]; then
+            echo "🩹 Force-patching vs_toolchain.py..."
+            # Stub out the Update function to prevent it from calling external scripts
+            sed -i "/def Update(/a \  return 0" build/vs_toolchain.py
+            # Ensure the hash and version match our environment
+            sed -i "s/TOOLCHAIN_HASH = .*/TOOLCHAIN_HASH = '$HASH'/g" build/vs_toolchain.py
+            sed -i "s/SDK_VERSION = .*/SDK_VERSION = '10.0.26100.0'/g" build/vs_toolchain.py
+            # Force it to think the environment is always correct
+            sed -i "s/return version != env_version/return False/g" build/vs_toolchain.py
+            # ⚠️ We do NOT add this to EXCLUDE_LIST because we don't want Ninja
+            # to see it as "new" and trigger a 6-hour full build regeneration.
+        fi
+
+        # RESTORE TIMESTAMPS (THE MAGIC):
+        # This is the "Hardened Incremental" logic. We reset the mtime of every 
+        # UNCHANGED file back to the 'past' (the sentinel). This tricks Ninja into
+        # reusing the 60,000+ .o files in out/.
+        if [ -f "$SENTINEL" ] && [ "$CLEAN_BUILD" = "0" ]; then
+            echo "🕐 Restoring timestamps for unchanged files to preserve incremental build..."
+            sort -u "$EXCLUDE_LIST" -o "$EXCLUDE_LIST"
+            
+            # Every file NOT in EXCLUDE_LIST gets the SENTINEL time (the past)
+            find . \( -path ./out -o -path ./.git \) -prune -o -type f -printf "%P\n" | \
+                grep -v -F -x -f "$EXCLUDE_LIST" | \
+                tr '\n' '\0' | xargs -0 -r touch -h -r "$SENTINEL"
+            
+            # Special Case: Explicitly touch vs_toolchain.py to the past even if it was modified
+            [ -f build/vs_toolchain.py ] && touch -h -r "$SENTINEL" build/vs_toolchain.py
+            
+            echo "✅ Timestamps restored. Ninja should now perform an incremental build."
+        fi
+        rm -f "$EXCLUDE_LIST"
+
+        echo "$CURRENT_STATE" > "$STATE_FILE"
+    else
+        echo "✅ Already patched and injected for $CHROMIUM_VERSION. Skipping to preserve timestamps."
+    fi
+
+# 2.2 Legacy Intelligence (Removed - Integrated above)
+
+
+# 2.3 Windows Toolchain Configuration (PROVEN METHOD)
+if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    TOOLCHAIN_ROOT="$VOLUME_NAME/win_toolchain"; TOOLCHAIN_DEST="$TOOLCHAIN_ROOT/vs_files/$HASH"
+    
+    # 2.3.1 ciopfs Mount (WHY):
+    # Windows headers use MixedCase. Linux is case-sensitive. ciopfs emulates
+    # a case-insensitive disk so clang can find 'Windows.h'. We check mountpoint
+    # first because double-mounting FUSE can hang the kernel.
     if ! mountpoint -q "$TOOLCHAIN_ROOT/vs_files"; then
+        mkdir -p "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files"
         echo "📂 Mounting case-insensitive toolchain filesystem..."
         ciopfs -o use_ino "$TOOLCHAIN_ROOT/vs_files.ciopfs" "$TOOLCHAIN_ROOT/vs_files" || true
     fi
 
-    # 2. Extract toolchain if missing (Perform only once)
-    if [ ! -f "$TOOLCHAIN_DEST/VS_VERSION" ]; then
-        echo "📦 Initializing Windows toolchain in volume..."
+    if [ ! -f "$TOOLCHAIN_DEST/vs_version" ]; then
+        echo "📂 Preparing Windows toolchain (7z)..."
         mkdir -p "$TOOLCHAIN_DEST"
-        TOOLCHAIN_ARCHIVE="/chromium/${HASH}.7z"
-        if [ ! -f "$TOOLCHAIN_ARCHIVE" ]; then
-            echo "📥 Downloading toolchain from GitHub (one-time, ~1.3 GB)..."
-            curl -L -o "$TOOLCHAIN_ARCHIVE" "https://github.com/naminx/chromium-toolchain/releases/download/v1.0.0.42b5b0689e/42b5b0689e.7z"
+        if [ ! -f "$VOLUME_NAME/$HASH.7z" ]; then
+            echo "  📥 Downloading toolchain archive..."
+            curl -L -o "$VOLUME_NAME/$HASH.7z" "https://github.com/naminx/chromium-mv2/releases/download/$SDK_VER/$HASH.7z"
         fi
-        echo "📂 Extracting 7z toolchain (with password)..."
-        7z x -p42b5b0689e "$TOOLCHAIN_ARCHIVE" -o"$TOOLCHAIN_DEST"
-        echo "✅ Extraction complete."
+        echo "  📦 Extracting toolchain..."
+        # WHY: We use the GITHUB_TOKEN as the password to prevent redistribution.
+        7z x -p"${GITHUB_TOKEN}" "$VOLUME_NAME/$HASH.7z" -o"$TOOLCHAIN_DEST"
     fi
-
-    # Link to depot_tools so the build scripts find it naturally
-    mkdir -p /depot_tools/win_toolchain
-    ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
-fi
-
-# DEPOT_TOOLS_WIN_TOOLCHAIN stays at default (1) so GetVisualStudioVersion()
-# returns '2022' without trying to auto-detect VS on Linux.
-# The win_toolchain.json we write below makes ShouldUpdateToolchain() return
-# False, which prevents any download attempt.
-
-# ── First-time source fetch ───────────────────────────────────────────────────
-# Clean up orphaned gclient temp directories BEFORE attempting any fetch/sync.
-# When 'fetch' or 'gclient sync' is interrupted mid-clone (e.g. disk full,
-# Ctrl+C, OOM-kill), it leaves behind:
-#   _gclient_src_XXXXXXXX/  — partial git clone, can be gigabytes
-#   _bad_scm/               — gclient's own failed-recovery debris
-# These silently fill the disk so every subsequent retry hits the same
-# "No space left on device" error and the volume never recovers.
-# ── Helper: Write win_toolchain.json (must exist BEFORE gclient runhooks) ──────
-# vs_toolchain.py checks for this file. If it matches version '2022',
-# ShouldUpdateToolchain() returns False → no download is attempted.
-write_toolchain_json() {
+    
+    # ── THE PROVEN OVERRIDES ──
+    # WHY: These variables and JSON values force Chromium to use our mounted 
+    # folder instead of attempting a GCS download.
+    export GYP_MSVS_OVERRIDE_PATH="$TOOLCHAIN_DEST"
+    export WINDOWSSDKDIR="$TOOLCHAIN_DEST/windows kits/10"
+    mkdir -p /depot_tools/win_toolchain && ln -sfn "$TOOLCHAIN_ROOT/vs_files" /depot_tools/win_toolchain/vs_files
+    
     mkdir -p build
-    NEW=$(cat <<'TCEOF'
+    cat > build/win_toolchain.json << JSON
 {
-  "path": "TOOLCHAIN_DEST_PLACEHOLDER",
-  "version": "42b5b0689e",
-  "win_sdk": "TOOLCHAIN_DEST_PLACEHOLDER/Windows Kits/10",
-  "wdk": "TOOLCHAIN_DEST_PLACEHOLDER/wdk",
+  "path": "$TOOLCHAIN_DEST",
+  "version": "$HASH",
+  "win_sdk": "$TOOLCHAIN_DEST/windows kits/10",
+  "wdk": "$TOOLCHAIN_DEST/wdk",
   "runtime_dirs": [
-    "TOOLCHAIN_DEST_PLACEHOLDER/sys64",
-    "TOOLCHAIN_DEST_PLACEHOLDER/sys32",
-    "TOOLCHAIN_DEST_PLACEHOLDER/sysarm64"
+    "$TOOLCHAIN_DEST/sys64",
+    "$TOOLCHAIN_DEST/sys32",
+    "$TOOLCHAIN_DEST/sysarm64"
   ]
 }
-TCEOF
-)
-    NEW=$(echo "$NEW" | sed "s|TOOLCHAIN_DEST_PLACEHOLDER|$TOOLCHAIN_DEST|g")
-    EXISTING=$(cat build/win_toolchain.json 2>/dev/null || true)
-    if [ "$NEW" != "$EXISTING" ]; then
-        echo "$NEW" > build/win_toolchain.json
-        echo "✅ win_toolchain.json updated."
-    else
-        echo "✅ win_toolchain.json unchanged (skipping write)."
-    fi
-}
+JSON
 
-# ── Sync/update the source tree ──────────────────────────────────────────────
-echo "🔍 [DEBUG] Identity: $([ -f /.dockerenv ] && echo "DOCKER" || echo "HOST") | PWD: $(pwd) | SKIP_SYNC: $SKIP_GCLIENT_SYNC"
+    # ⚠️ CRITICAL: We must touch this to the past to avoid Ninja regeneration.
+    SENTINEL="/tmp/last_build_sentinel"
+    [ -f "$SENTINEL" ] && touch -r "$SENTINEL" build/win_toolchain.json
 
-if [ "$SKIP_GCLIENT_SYNC" = "1" ]; then
-    echo "⏭️  [DOCKER] SKIP_GCLIENT_SYNC is set. Bypassing internal sync logic..."
-else
-    if [ -f /.dockerenv ]; then
-        echo "❌ FATAL ERROR: Attempted to run 100GB sync INSIDE a Docker container!"
-        echo "   This process would crash the server. Aborting sync immediately."
-        exit 1
-    fi
-    echo "📥 [HOST] Starting Chromium source sync..."
-    echo "🧹 Finding and quietly trashing any corrupted component repos..."
-find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
-    echo "   🗑️  Sweeping corrupted component to background trash: $d"
-    PARENT_DIR="$(dirname "$d")"
-    # Never delete the root directory (.) if d is directly in root
-    if [ "$PARENT_DIR" != "." ]; then
-        TRASH_PARENT="$(dirname "$PARENT_DIR")/.trash_$(date +%s)_$(basename "$PARENT_DIR")"
-        mv "$PARENT_DIR" "$TRASH_PARENT" 2>/dev/null || true
-        nohup rm -rf "$TRASH_PARENT" >/dev/null 2>&1 &
-    else
-        TRASH_DIR=".trash_$(date +%s)_$(basename "$d")"
-        mv "$d" "$TRASH_DIR" 2>/dev/null || true
-        nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
-    fi
-done
-
-# ── First-time source fetch ───────────────────────────────────────────────────
-# We write .gclient manually (same content as 'fetch --nohooks chromium' would
-# produce) and then call gclient sync directly. This lets us wrap the 30 GB
-# clone in a retry loop — 'fetch' has no built-in retry for fatal clone errors
-# like "invalid index-pack output" (transient network failures during large
-# pack transfers).
-if [ ! -f ".gclient" ]; then
-    echo ""
-    echo "📝 Writing .gclient config (equivalent to 'fetch --nohooks chromium')..."
-    cat > .gclient << 'GCLIENTEOF'
-solutions = [
-  {
-    "name": "src",
-    "url": "https://chromium.googlesource.com/chromium/src.git",
-    "managed": False,
-    "custom_deps": {},
-    "custom_vars": {},
-  },
-]
-GCLIENTEOF
-fi
-
-# Clone/sync with retry.
-if [ ! -d "src" ] || ! git -C src rev-parse --git-dir > /dev/null 2>&1; then
-    if [ -d "src" ]; then
-        echo "🗑️  Cleaning broken partial src/ checkout (preserving out/)..."
-        TRASH_DIR="/chromium/.trash_src_$(date +%s)"
-        mkdir -p "$TRASH_DIR"
-        # Move everything EXCEPT 'out' to trash
-        find src -maxdepth 1 ! -name 'src' ! -name 'out' -exec mv {} "$TRASH_DIR/" + 2>/dev/null || true
-        nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
-    fi
-    for attempt in 1 2 3; do
-        echo ""
-        echo "📥 Fetching Chromium source tree — attempt ${attempt}/3..."
-        
-        # Clean temp dirs from any previous failed attempt before retrying.
-        find . -maxdepth 5 -type d \( -name "_gclient_src_*" -o -name "_bad_scm" \) -print | while IFS= read -r d; do
-            echo "   🗑️  Sweeping corrupted component to background trash: $d"
-            PARENT_DIR="$(dirname "$d")"
-            if [ "$PARENT_DIR" != "." ]; then
-                TRASH_PARENT="$(dirname "$PARENT_DIR")/.trash_$(date +%s)_$(basename "$PARENT_DIR")"
-                mv "$PARENT_DIR" "$TRASH_PARENT" 2>/dev/null || true
-                nohup rm -rf "$TRASH_PARENT" >/dev/null 2>&1 &
-            else
-                TRASH_DIR=".trash_$(date +%s)_$(basename "$d")"
-                mv "$d" "$TRASH_DIR" 2>/dev/null || true
-                nohup rm -rf "$TRASH_DIR" >/dev/null 2>&1 &
-            fi
-        done
-
-        SYNC_SUCCESS=0
-        if [ "$SHALLOW_CLONE" = "1" ]; then
-            echo "🚀 Performing manual shallow fetch of src tag $CHROMIUM_VERSION..."
-            mkdir -p src
-            if git -C src init && \
-               git -C src remote add origin https://chromium.googlesource.com/chromium/src.git && \
-               git -C src fetch --depth 1 origin "refs/tags/$CHROMIUM_VERSION" && \
-               git -C src checkout FETCH_HEAD; then
-                echo "✅ Manual shallow fetch of src complete."
-                # Now use gclient just for the DEPS
-                if gclient sync --nohooks --no-history --jobs $(nproc); then
-                    SYNC_SUCCESS=1
-                fi
-            fi
-        else
-            if gclient sync --nohooks --with_branch_heads --with_tags --jobs $(nproc); then
-                SYNC_SUCCESS=1
-            fi
-        fi
-
-        if [ "$SYNC_SUCCESS" = "1" ]; then
-            echo "✅ Source fetch complete."
-            break
-        fi
-
-        if [ "$attempt" -lt 3 ]; then
-            echo "⚠️  Fetch failed (attempt ${attempt}/3) — likely a transient network error."
-            echo "   Waiting 60s before retry..."
-            sleep 60
-        else
-            echo "❌ Source fetch failed after 3 attempts. Check network connectivity."
-            exit 1
-        fi
-    done
-
-    # Restore the cached out/ directory if we saved it earlier
-    if [ -d "/tmp/saved_out" ]; then
-        echo "📦 Restoring saved out/ directory into fresh src checkout..."
-        mkdir -p src
-        mv /tmp/saved_out src/out
-    fi
-fi
-
-cd src
-
-# ── Setup Environment for Windows builds ────────────────────────────────────
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
-    export GYP_MSVS_OVERRIDE_PATH="$TOOLCHAIN_DEST"
-    export WINDOWSSDKDIR="$TOOLCHAIN_DEST/Windows Kits/10"
-fi
-# Keep =0 initially so 'gclient runhooks → vs_toolchain.py update --force' skips
-# the GCS download. DEPOT_TOOLS_WIN_TOOLCHAIN=0 makes Update() return 0
-# immediately without calling get_toolchain_if_necessary.py. We'll flip to 1
-# before gn gen so GetVisualStudioVersion() returns '2022'.
-export DEPOT_TOOLS_WIN_TOOLCHAIN=0
-
-# First call – build/ may not exist yet if repo was just fetched,
-# but we try anyway; it will succeed once src/ exists.
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
-    [ -d build ] && write_toolchain_json || true
-fi
-
-# Revert any previously applied patches and remove any untracked files that
-# would block git checkout (e.g. files created by gclient sync that are also
-# present in the target version tag). out/ is gitignored so build artifacts
-# are never affected by git clean -fd (only git clean -fdx would wipe them).
-git reset --hard HEAD 2>/dev/null || true
-git clean -fd 2>/dev/null || true
-
-# VERSION_FILE must be defined HERE — before PREV_VERSION is read — so the
-# incremental "touch changed files" step below actually fires.
-# (Previously this was defined ~120 lines later, making PREV_VERSION always
-# empty and causing ninja to silently use stale artifacts after version bumps.)
-VERSION_FILE="out/win/.last_built_version"
-PREV_VERSION=""
-[ -f "$VERSION_FILE" ] && PREV_VERSION=$(cat "$VERSION_FILE")
-
-if [ -n "$FROM_CACHE_VERSION" ]; then
-    PREV_VERSION="$FROM_CACHE_VERSION"
-    echo "ℹ️  Using previous version from --from-cache: $PREV_VERSION"
-fi
-
-if ! git rev-parse "$CHROMIUM_VERSION" >/dev/null 2>&1 || [ "$(git rev-parse HEAD)" != "$(git rev-parse "${CHROMIUM_VERSION}^{commit}" 2>/dev/null)" ]; then
-    echo "🔄 Syncing to version $CHROMIUM_VERSION..."
-    git fetch --tags
-    git checkout "$CHROMIUM_VERSION"
-    # git checkout stamps every touched file with "now", which makes ninja
-    # think the entire source tree is modified → full recompile.
-    #
-    # Fix in two steps:
-    # 1. git-restore-mtime: resets each file's mtime to the last commit that
-    #    modified it (historical, old timestamps → ninja skips unchanged files).
-    # 2. Touch files that actually changed vs the previous version: their
-    #    historical commit timestamps are older than when we built the previous
-    #    version, so without this touch ninja would incorrectly skip them.
-    echo "🕐 Restoring source file timestamps (git restore-mtime)..."
-    git restore-mtime --force
-    if [ -n "$PREV_VERSION" ] && git rev-parse "$PREV_VERSION" >/dev/null 2>&1; then
-        echo "🔁 Touching files changed between $PREV_VERSION and $CHROMIUM_VERSION..."
-        git diff --name-only --diff-filter=d "$PREV_VERSION" "$CHROMIUM_VERSION" | xargs -r -d '\n' sh -c 'for f; do [ -e "$f" ] && touch -c -- "$f"; done' sh || true
-    fi
-else
-    echo "✅ Already at version $CHROMIUM_VERSION. Skipping fetch/checkout."
-fi
-
-# Ensure .gclient declares target_os for platform dependencies
-if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
-    if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
-        echo "target_os = ['linux', 'win']" >> /chromium/.gclient
-        echo "✅ Added target_os = ['linux', 'win'] to .gclient"
-    elif ! grep -q "'win'" /chromium/.gclient 2>/dev/null; then
-        sed -i "s/target_os = \[/target_os = ['win', /" /chromium/.gclient
-        echo "✅ Updated target_os to include 'win' in .gclient"
-    fi
-else
-    # Only building deb/linux
-    if ! grep -q "target_os" /chromium/.gclient 2>/dev/null; then
-        echo "target_os = ['linux']" >> /chromium/.gclient
-        echo "✅ Added target_os = ['linux'] to .gclient"
-    fi
-fi
-
-# gclient sync fetches third-party deps for this exact version.
-# --force is intentionally OMITTED: it does 'git reset --hard' on all sub-repos,
-# touching thousands of source file timestamps and causing a full recompile.
-if [ "$SHALLOW_CLONE" = "1" ]; then
-    gclient sync \
-        --nohooks \
-        --no-history \
-        --revision "src@refs/tags/$CHROMIUM_VERSION" \
-        --delete_unversioned_trees
-else
-    gclient sync \
-        --nohooks \
-        --with_branch_heads \
-        --with_tags \
-        --delete_unversioned_trees
-fi
-
-    echo "✅ Source synced to $CHROMIUM_VERSION"
-fi
-
-echo "🔍 [DEBUG] Pre-CD Check: $(pwd) | Content: $(ls -m)"
-cd src || { echo "❌ ERROR: Could not enter 'src' directory. Current dir: $(pwd)"; ls -F; exit 1; }
-
-# ── Prepare clean state for patching ────────────────────────────────────────
-# Revert any previously applied patches to avoid "Reversed patch" errors.
-echo "🧹 Resetting source tree to clean state..."
-git reset --hard HEAD 2>/dev/null || true
-git clean -fd 2>/dev/null || true
-
-echo "🔍 [DEBUG] Post-CD Check: $(pwd) | Content: $(ls -m | head -c 100)..."
-
-# Force Chromium to accept our customized mounted Windows toolchain by rewriting its expectations
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
-    if [ -f build/vs_toolchain.py ]; then
-        sed -i "s/TOOLCHAIN_HASH = .*/TOOLCHAIN_HASH = '42b5b0689e'/g" build/vs_toolchain.py
-        sed -i "s/subprocess.check_call(get_toolchain_args)/pass/g" build/vs_toolchain.py
-    fi
-
-    # Re-write toolchain JSON after sync (sync may recreate build/ directory)
-    write_toolchain_json
-fi
-
-# ── Ensure .gclient is configured for the current target ─────────────────────
-# For Windows cross-compile, we MUST have "target_os": ["win"] in .gclient
-GCLIENT_FILE="/chromium/.gclient"
-if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
-    if ! grep -q '"win"' "$GCLIENT_FILE" 2>/dev/null; then
-        echo "📝 Configuring .gclient for Windows cross-compile..."
-        cat > "$GCLIENT_FILE" << 'EOF'
-solutions = [
-    {
-        "name": "src",
-        "url": "https://chromium.googlesource.com/chromium/src.git",
-        "managed": False,
-        "custom_deps": {},
-        "custom_vars": {},
-    },
-]
-target_os = ["win", "linux"]
-EOF
-        FORCE_HOOKS=1
-    fi
-fi
-
-# ── Install / update Linux host build dependencies ───────────────────────────
-# These are the *host* tools needed to run the cross-compiler itself.
-# IMPORTANT: sentinel is on the PERSISTENT VOLUME (/chromium), not /tmp.
-LAST_TARGET_FILE="/chromium/.last_target"
-[ -f "$LAST_TARGET_FILE" ] && LAST_TARGET=$(cat "$LAST_TARGET_FILE") || LAST_TARGET=""
-
-FORCE_HOOKS=0
-if [ "$LAST_TARGET" != "$BUILD_TARGET" ]; then
-    # If the last target was 'all', it is compatible with both 'win' and 'deb'
-    if [ "$LAST_TARGET" = "all" ]; then
-        echo "✅ Volume is Universal (all). Skipping toolchain re-sync for $BUILD_TARGET."
-    else
-        echo "🔄 Target changed ($LAST_TARGET → $BUILD_TARGET) — updating toolchains..."
-        FORCE_HOOKS=1
-    fi
-    # Always update the tracker to the most specific request
-    echo "$BUILD_TARGET" > "$LAST_TARGET_FILE"
-fi
-
-if [ ! -f /chromium/.deps_installed ] || [ "$FORCE_HOOKS" = "1" ]; then
-    if [ ! -f /chromium/.deps_installed ]; then
-        echo ""
-        echo "📦 Installing Linux host build dependencies (first run only)..."
-        ./build/install-build-deps.sh --no-prompt --no-chromeos-fonts --no-arm
-        touch /chromium/.deps_installed
-    fi
-    # DEPOT_TOOLS_WIN_TOOLCHAIN=0 is MANDATORY here. 
-    # It prevents 'gclient runhooks' from trying to download the official 
-    # Windows SDK from Google's private storage (which causes the 401 error).
-    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
-    echo "🛠️  Running gclient hooks (Native tools)..."
-    gclient runhooks
-    
-    # We manually update Clang to ensure we have the Windows cross-compile libs
-    echo "🔧 Updating Clang toolchain (Universal)..."
-    python3 tools/clang/scripts/update.py
-fi
-
-# We only enable the Windows toolchain flag AFTER the hooks are done.
-# This allows 'gn gen' to see our local toolchain without triggering a download.
-if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    # Switch to 1 so 'gn gen' sees the toolchain is ready
     export DEPOT_TOOLS_WIN_TOOLCHAIN=1
 else
     export DEPOT_TOOLS_WIN_TOOLCHAIN=0
 fi
 
-# Ensure JSON is still current
-write_toolchain_json
+# 2.4 Resources and Build
+CPU_COUNT=$(nproc); TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
+NINJA_JOBS=$(( TOTAL_MEM_GB / 2 )); [ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+[ "$NINJA_JOBS" -gt "$CPU_COUNT" ] && NINJA_JOBS=$CPU_COUNT
+CONCURRENT_LINKS=$(( TOTAL_MEM_GB / 16 )); [ "$CONCURRENT_LINKS" -lt 1 ] && CONCURRENT_LINKS=1
 
-# ── Apply custom patches ──────────────────────────────────────────────────────
-# git reset --hard above already cleaned the tree, so we don't need to revert.
-# --input=FILE: read patch from file, not stdin (prevents patch from consuming
-#   heredoc content when it wants to ask an interactive question)
-# --forward: silently skip hunks that are already applied upstream (Chromium
-#   may have adopted the change between minor versions)
-# --batch: non-interactive; choose safe defaults for all prompts
-echo ""
-echo "🩹 Applying patches..."
-PATCH_FAILED=0
-for patch in /patches/*.patch; do
-    patch_name="$(basename "$patch")"
-    echo "  ✅ Applying: $patch_name"
-    if ! patch -p1 --forward --batch --input="$patch"; then
-        echo "  ❌ Patch failed: $patch_name — stopping build."
-        PATCH_FAILED=1
-    fi
-done
-if [ "$PATCH_FAILED" = "1" ]; then
-    echo ""
-    echo "❌ One or more patches failed. Check .rej files in the source tree."
-    echo "   Update the failing patch before retrying the build."
-    exit 1
+if [ "$BUILD_TARGET" = "deb" ] || [ "$BUILD_TARGET" = "all" ]; then
+    echo "🔨 Building Linux Debian package..."
+    mkdir -p out/linux
+    # WHY: chrome_pgo_phase=0 is mandatory to skip missing Google performance profiles.
+    ARGS="is_official_build=true symbol_level=0 target_os=\"linux\" proprietary_codecs=true ffmpeg_branding=\"Chrome\" chrome_pgo_phase=0"
+    [ ! -f out/linux/build.ninja ] && gn gen out/linux --args="$ARGS"
+    ninja -C out/linux chrome chrome/installer/linux:stable_deb -j$NINJA_JOBS
+    cp out/linux/chromium-browser-stable_*.deb /host_out/ 2>/dev/null || true
+    do_release "deb"
 fi
 
-# ── Linux Build (Debian) ───────────────────────────────────────────────────
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "deb" ]; then
-    CPU_COUNT=$(nproc)
-    TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-
-    # Account for RAM disks in available memory calculation
-    RESERVED_GB=0
-    if [ "$TOTAL_MEM_GB" -gt 128 ]; then
-        RESERVED_GB=110  # 100GB out + 10GB toolchain
-    elif [ "$TOTAL_MEM_GB" -gt 64 ]; then
-        RESERVED_GB=10   # 10GB toolchain only
-    fi
-
-    AVAILABLE_MEM_GB=$(( TOTAL_MEM_GB - RESERVED_GB ))
-    [ "$AVAILABLE_MEM_GB" -lt 16 ] && AVAILABLE_MEM_GB=16
-    
-    # Each clang-cl/link job takes ~2GB
-    MAX_JOBS_BY_MEM=$(( AVAILABLE_MEM_GB / 2 ))
-    NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
-    
-    # For linking, we can be more aggressive if we have RAM
-    CONCURRENT_LINKS=$(( AVAILABLE_MEM_GB / 16 ))
-    [ "$CONCURRENT_LINKS" -lt 1 ] && CONCURRENT_LINKS=1
-    [ "$CONCURRENT_LINKS" -gt 8 ] && CONCURRENT_LINKS=8 # Diminishing returns after 8
-
-    echo ""
-    GN_ARGS_LINUX="
-        target_os = \"linux\"
-        is_debug = false
-        is_official_build = true
-        chrome_pgo_phase = 0
-        symbol_level = 0
-        blink_symbol_level = 0
-        v8_symbol_level = 0
-        proprietary_codecs = true
-        ffmpeg_branding = \"Chrome\"
-    "
-
-    # Intelligently re-run gn gen if arguments changed or ninja file is missing.
-    # We compare the current GN_ARGS with the existing args.gn to avoid "ghost" warnings.
-    RECONFIGURE=0
-    if [ ! -f out/linux/build.ninja ] || [ ! -f out/linux/args.gn ]; then
-        RECONFIGURE=1
-    else
-        # Normalize whitespace and compare
-        CURRENT_ARGS_NORM=$(echo "$GN_ARGS_LINUX" | tr -d '[:space:]')
-        EXISTING_ARGS_NORM=$(cat out/linux/args.gn | tr -d '[:space:]' | sed 's/import.*//')
-        [ "$CURRENT_ARGS_NORM" != "$EXISTING_ARGS_NORM" ] && RECONFIGURE=1
-    fi
-
-    if [ "$RECONFIGURE" = "1" ]; then
-        echo "⚙️  Configuring Linux (Debian) build (gn gen)..."
-        # Temporary fix: chrome_management_service fails to link in official builds
-        git checkout chrome/installer/linux/BUILD.gn 2>/dev/null || true
-        sed -i 's|.*root_out_dir/chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
-        sed -i '/strip_binary("strip_chrome_management_service") {/,/}/ s/^/# /' chrome/installer/linux/BUILD.gn
-        sed -i 's|.*:strip_chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
-        sed -i 's|.*//chrome/browser/enterprise/connectors/device_trust/key_management/installer/management_service:chrome_management_service.*|# \0|' chrome/installer/linux/BUILD.gn
-
-        gn gen out/linux --args="$GN_ARGS_LINUX"
-    else
-        echo "⏭️  Configuration up-to-date. Skipping gn gen..."
-    fi
-    echo "🔍 Validating Linux build targets..."
-    if ! ninja -C out/linux -n chrome chrome_sandbox chrome/installer/linux:stable >/dev/null 2>&1; then
-        echo "❌ ERROR: One or more Ninja targets are invalid for this version of Chromium."
-        echo "   Check: chrome, chrome_sandbox, chrome/installer/linux:stable"
-        exit 1
-    fi
-
-    echo ""
-    echo "Building Debian package (incremental)..."
-    # Build chrome first, then the installer package
-    ninja -C out/linux chrome chrome_sandbox -j${NINJA_JOBS}
-    ninja -C out/linux chrome/installer/linux:stable_deb -j${NINJA_JOBS}
-
-    # Search for the deb in the linux output dir
-    DEB_FILE=$(find out/linux -name "chromium-browser-stable_*.deb" | head -n 1)
-    if [ -z "$DEB_FILE" ]; then
-        echo "❌ ERROR: Linux build succeeded but no .deb was found in out/linux/"
-        exit 1
-    fi
-
-    DEST_DEB="/host_out/$(basename "$DEB_FILE" .deb)-${CHROMIUM_VERSION}.deb"
-    cp "$DEB_FILE" "$DEST_DEB"
-    echo "✅ Linux build complete: $(basename "$DEST_DEB")"
-fi
-
-# ── Generate / refresh build configuration (Windows cross-compile) ───────────
-if [ "$BUILD_TARGET" = "all" ] || [ "$BUILD_TARGET" = "win" ]; then
-    echo ""
-    echo "⚙️  Configuring Windows cross-compile build (gn gen)..."
-
-    GN_ARGS="
-        target_os = \"win\"
-        is_debug = false
-        is_official_build = true
-        chrome_pgo_phase = 0
-        symbol_level = 0
-        blink_symbol_level = 0
-        v8_symbol_level = 0
-        proprietary_codecs = true
-        ffmpeg_branding = \"Chrome\"
-    "
-    # Always run gn gen — it is idempotent and takes ~5s. The previous conditional
-    # used a fragile whitespace comparison that always triggered a re-run anyway,
-    # and the re-run could confuse ninja's dependency tracking.
-    # Intelligently re-run gn gen if arguments changed or ninja file is missing.
-    RECONFIGURE=0
-    if [ ! -f out/win/build.ninja ] || [ ! -f out/win/args.gn ]; then
-        RECONFIGURE=1
-    else
-        # Normalize whitespace and compare
-        CURRENT_ARGS_NORM=$(echo "$GN_ARGS" | tr -d '[:space:]')
-        EXISTING_ARGS_NORM=$(cat out/win/args.gn | tr -d '[:space:]' | sed 's/import.*//')
-        [ "$CURRENT_ARGS_NORM" != "$EXISTING_ARGS_NORM" ] && RECONFIGURE=1
-    fi
-
-    if [ "$RECONFIGURE" = "1" ]; then
-        echo "⚙️  Configuring Windows build (gn gen)..."
-        gn gen out/win --args="$GN_ARGS"
-    else
-        echo "⏭️  Configuration up-to-date. Skipping gn gen..."
-    fi
-
-    # Ensure output directory exists for version tracking
+if [ "$BUILD_TARGET" = "win" ] || [ "$BUILD_TARGET" = "all" ]; then
+    echo "🔨 Building Windows Installer..."
     mkdir -p out/win
-
-    echo "🔍 Validating Windows build targets..."
-    if ! ninja -C out/win -n mini_installer; then
-        echo "❌ ERROR: Ninja target 'mini_installer' is invalid for this version of Chromium."
-        exit 1
-    fi
-
-    # VERSION_FILE tracks the last successfully built version to trigger relinks
-    VERSION_FILE="out/win/.last_built_version"
-    [ -f "$VERSION_FILE" ] && PREV_VERSION=$(cat "$VERSION_FILE") || PREV_VERSION=""
-
-    if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$CHROMIUM_VERSION" ]; then
-        echo "Version changed ($PREV_VERSION → $CHROMIUM_VERSION) — forcing relink."
-        rm -f out/win/mini_installer.exe out/win/mini_installer.exe.pdb
-    fi
-    echo "$CHROMIUM_VERSION" > "$VERSION_FILE"
-
-    CPU_COUNT=$(nproc)
-
-    # clang-cl Windows cross-compile uses ~2 GB RAM per parallel job.
-    # Cap job count so we don't OOM-kill workers silently on home PCs.
-    TOTAL_MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-    MAX_JOBS_BY_MEM=$(( TOTAL_MEM_GB / 2 ))
-    [ "$MAX_JOBS_BY_MEM" -lt 1 ] && MAX_JOBS_BY_MEM=1
-    NINJA_JOBS=$(( CPU_COUNT < MAX_JOBS_BY_MEM ? CPU_COUNT : MAX_JOBS_BY_MEM ))
-    echo "   CPUs: $CPU_COUNT  |  RAM: ${TOTAL_MEM_GB}GB  |  ninja -j${NINJA_JOBS}"
-
-    echo ""
-    echo "Building mini_installer (incremental)..."
-
-    # Use the base target name for reliable phony resolution
-    ninja -C out/win mini_installer -j${NINJA_JOBS}
-
-    if [ ! -f out/win/mini_installer.exe ]; then
-        echo "❌ ERROR: ninja succeeded but mini_installer.exe was not produced!"
-        echo "   This usually means the target was already considered up-to-date."
-        echo "   Try running: docker run --rm -v chromium-mv2-src:/c ubuntu:22.04 rm /c/src/out/win/mini_installer.exe"
-        exit 1
-    fi
-
-    DEST="/host_out/mini_installer-${CHROMIUM_VERSION}.exe"
-    cp out/win/mini_installer.exe "$DEST"
-
-    echo ""
-    echo "════════════════════════════════════════════════════"
-    echo " ✅ SUCCESS!"
-    echo "    mini_installer-${CHROMIUM_VERSION}.exe"
-    echo "    has been copied to your build-docker.sh directory."
-    echo "════════════════════════════════════════════════════"
+    ARGS="is_official_build=true symbol_level=0 target_os=\"win\" proprietary_codecs=true ffmpeg_branding=\"Chrome\" chrome_pgo_phase=0"
+    [ ! -f out/win/build.ninja ] && gn gen out/win --args="$ARGS"
+    ninja -C out/win mini_installer -j$NINJA_JOBS
+    cp out/win/mini_installer.exe /host_out/mini_installer-$CHROMIUM_VERSION.exe 2>/dev/null || true
+    do_release "win"
 fi
-INNER
+
+echo "$CHROMIUM_VERSION" > "$VOLUME_NAME/.last_built_version"
+echo "✅ SUCCESS."

@@ -3,9 +3,21 @@ result
 result-*
 
 # direnv cache
-.direnv/
-.openclaude-profile.*
-mini_installer-*.exe
-chromium-browser-*.deb
 *.7z
+.build_state/
+.cipd/
+.clangd
+.direnv/
+.gclient*
+.gcs_entries
+.openclaude-profile.*
+.thclaws/
+.vscode/
+chromium-browser-*.deb
+logs/
+mini_installer-*.exe
 packager_output.log
+patches/google-sync.patch
+release-staging/
+src/
+win_toolchain/

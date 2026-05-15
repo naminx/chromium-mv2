@@ -1,0 +1,64 @@
+diff --git a/chrome/browser/glic/public/glic_enabling.cc b/chrome/browser/glic/public/glic_enabling.cc
+index 814f86b7eb..3c6ce38d01 100644
+--- a/chrome/browser/glic/public/glic_enabling.cc
++++ b/chrome/browser/glic/public/glic_enabling.cc
+@@ -375,6 +375,14 @@ GlicEnabling::ProfileEnablement GlicEnabling::EnablementForProfile(
+     }
+     result.primary_account_not_capable =
+         (capability_value != signin::Tribool::kTrue);
++    // When AiSettingsPageForceAvailable is enabled (self-build/unbranded),
++    // treat unknown account capability as enabled — the server doesn't
++    // recognize this client and returns kUnknown.
++    if (base::FeatureList::IsEnabled(
++            optimization_guide::features::kAiSettingsPageForceAvailable) &&
++        capability_value == signin::Tribool::kUnknown) {
++      result.primary_account_not_capable = false;
++    }
+ 
+     // If the feature is overridden by a field trial, and the user's eligibility
+     // is known and different for the two capabilities, add them to a synthetic
+diff --git a/chrome/common/chrome_features.cc b/chrome/common/chrome_features.cc
+index fe665980e7..5caef830b4 100644
+--- a/chrome/common/chrome_features.cc
++++ b/chrome/common/chrome_features.cc
+@@ -425,10 +425,10 @@ const base::FeatureParam<base::TimeDelta> kGlicActorMoveBeforeClickDelay{
+ 
+ // Controls country and locale filtering for Glic.
+ // See chrome/browser/glic/public/glic_enabling.cc for more details.
+-BASE_FEATURE(kGlicCountryFiltering, base::FEATURE_ENABLED_BY_DEFAULT);
++BASE_FEATURE(kGlicCountryFiltering, base::FEATURE_DISABLED_BY_DEFAULT);
+ BASE_FEATURE(kGlicUseSessionCountryForFiltering,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+-BASE_FEATURE(kGlicLocaleFiltering, base::FEATURE_ENABLED_BY_DEFAULT);
++BASE_FEATURE(kGlicLocaleFiltering, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ // Controls the bugfix where the unified FRE synchronizes cookies to the wrong
+ // storage partition.
+@@ -446,13 +446,7 @@ const base::FeatureParam<int> kGlicTrustFirstOnboardingArmParam{
+ // IMPORTANT: this feature should never be expired! It is used as the main
+ // kill-switch for Glic and can be used in the future to handle unsupported
+ // Chrome versions.
+-BASE_FEATURE(kGlic,
+-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
+-             base::FEATURE_ENABLED_BY_DEFAULT
+-#else
+-             base::FEATURE_DISABLED_BY_DEFAULT
+-#endif
+-);
++BASE_FEATURE(kGlic, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ // Controls whether the Glic feature is always detached.
+ BASE_FEATURE(kGlicDetached, base::FEATURE_ENABLED_BY_DEFAULT);
+diff --git a/components/optimization_guide/core/optimization_guide_features.cc b/components/optimization_guide/core/optimization_guide_features.cc
+index 8eca79812b..0b3d970120 100644
+--- a/components/optimization_guide/core/optimization_guide_features.cc
++++ b/components/optimization_guide/core/optimization_guide_features.cc
+@@ -123,7 +123,7 @@ BASE_FEATURE(kOnDeviceModelFetchPerformanceClassEveryStartup,
+ // Force show the AI page and all AI feature sub-pages in settings, even if they
+ // would be unavailable otherwise. This is meant for development and test
+ // purposes only.
+-BASE_FEATURE(kAiSettingsPageForceAvailable, base::FEATURE_DISABLED_BY_DEFAULT);
++BASE_FEATURE(kAiSettingsPageForceAvailable, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kOnDeviceModelPerformanceParams, base::FEATURE_ENABLED_BY_DEFAULT);
+ 

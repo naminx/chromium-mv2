@@ -1,5 +1,3 @@
-diff --git a/google_apis/default_api_keys-inc.cc b/google_apis/default_api_keys-inc.cc
-index c41d274e4f84c..695bef9553d2d 100644
 --- a/google_apis/default_api_keys-inc.cc
 +++ b/google_apis/default_api_keys-inc.cc
 @@ -16,7 +16,7 @@
@@ -11,8 +9,8 @@ index c41d274e4f84c..695bef9553d2d 100644
  #endif
  
  #if !defined(GOOGLE_METRICS_SIGNING_KEY)
-@@ -24,46 +24,47 @@
- #endif
+@@ -31,46 +31,47 @@
+ #endif  // #if BUILDFLAG(SUPPORT_CDM_SERVER_CERTIFICATE)
  
  #if !defined(GOOGLE_CLIENT_ID_MAIN)
 -#define GOOGLE_CLIENT_ID_MAIN google_apis::DefaultApiKeys::kUnsetApiToken
@@ -68,7 +66,7 @@ index c41d274e4f84c..695bef9553d2d 100644
  #endif
  
  #if !BUILDFLAG(IS_ANDROID)
-@@ -112,11 +113,14 @@
+@@ -119,11 +120,14 @@
  // variables.  If set, they will be used to replace any of the client
  // IDs and secrets above that have not been set (and only those; they
  // will not override already-set values).
@@ -85,11 +83,9 @@ index c41d274e4f84c..695bef9553d2d 100644
  #endif
  
  constexpr ::google_apis::DefaultApiKeys GetDefaultApiKeysFromDefinedValues() {
-diff --git a/google_apis/default_api_keys.h b/google_apis/default_api_keys.h
-index 6a1983fef5c76..dba5a47e7a159 100644
 --- a/google_apis/default_api_keys.h
 +++ b/google_apis/default_api_keys.h
-@@ -17,6 +17,17 @@ struct DefaultApiKeys {
+@@ -18,6 +18,17 @@
    // various unit tests than leaving the token empty.
    static constexpr char kUnsetApiToken[] = "dummytoken";
  
@@ -98,11 +94,11 @@ index 6a1983fef5c76..dba5a47e7a159 100644
 +  static constexpr char kThorClientId[] = "CUSTOM_GOOGLE_CLIENT_ID_PLACEHOLDER";
 +  static constexpr char kThorClientSecret[] = "CUSTOM_GOOGLE_CLIENT_SECRET_PLACEHOLDER";
 +  // Remoting
-+  static constexpr char kThorApiKeyRemoting[] = "CUSTOM_GOOGLE_API_KEY_PLACEHOLDER"; // Same as kThorApiKey
-+  static constexpr char kThorClientIdRemoting[] = "440925447803-avn2sj1kc099s0r7v62je5s339mu0am1.apps.googleusercontent.com";
-+  static constexpr char kThorClientSecretRemoting[] = "Bgur6DFiOMM1h8x-AQpuTQlK";
++  static constexpr char kThorApiKeyRemoting[] = "CUSTOM_GOOGLE_API_KEY_PLACEHOLDER";
++  static constexpr char kThorClientIdRemoting[] = "CUSTOM_GOOGLE_CLIENT_ID_PLACEHOLDER";
++  static constexpr char kThorClientSecretRemoting[] = "CUSTOM_GOOGLE_CLIENT_SECRET_PLACEHOLDER";
 +  // SODA
-+  static constexpr char kThorApiKeySoda[] = "ce04d119-129f-404e-b4fe-6b913fffb6cb";
++  static constexpr char kThorApiKeySoda[] = "dummytoken";
 +
    bool allow_unset_values;
    bool allow_override_via_environment;

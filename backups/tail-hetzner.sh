@@ -34,7 +34,8 @@ if [ -z "$1" ]; then
             exit 1
         fi
     else
-        echo "Usage: ./tail-hetzner.sh <HETZNER_IP>"
+        echo "❌ Auto-discovery requires 'hcloud' CLI (not installed)."
+        echo "   Usage: ./tail-hetzner.sh <HETZNER_IP>"
         exit 1
     fi
 else
