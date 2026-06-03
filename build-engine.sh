@@ -128,8 +128,46 @@ elif [[ "$local_last_version" != "$VERSION" ]]; then
     # 2. Fetch new version
     git fetch --progress origin "refs/tags/${VERSION}" --depth 1
 
-    # 3. 🪄 The MTime Preserver: update files without affecting timestamps of unchanged files
+    # 3. 🪄 Save pre-checkout mtimes of all tracked files
+    log_info "💾 Saving timestamps of current tracked files..."
+    python3 -c "
+import subprocess, json, os
+try:
+    files = subprocess.check_output(['git', 'ls-files']).decode('utf-8').splitlines()
+    mtimes = {f: os.path.getmtime(f) for f in files if os.path.exists(f)}
+    with open('/tmp/pre_checkout_mtimes.json', 'w') as out:
+        json.dump(mtimes, out)
+except Exception as e:
+    print(f'Warning: Failed to save mtimes: {e}')
+" || true
+
+    # 4. Perform checkout
     git checkout -f FETCH_HEAD
+
+    # 5. 🪄 Restore mtimes of unchanged files to preserve build cache
+    log_info "⏳ Restoring timestamps of unchanged files..."
+    python3 -c "
+import subprocess, json, os
+try:
+    try:
+        changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', 'ORIG_HEAD', 'HEAD']).decode('utf-8').splitlines())
+    except Exception:
+        try:
+            changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', 'HEAD~1', 'HEAD']).decode('utf-8').splitlines())
+        except Exception:
+            changed = set()
+    if os.path.exists('/tmp/pre_checkout_mtimes.json'):
+        with open('/tmp/pre_checkout_mtimes.json') as f:
+            mtimes = json.load(f)
+        restored = 0
+        for f, mt in mtimes.items():
+            if f not in changed and os.path.exists(f):
+                os.utime(f, (mt, mt))
+                restored += 1
+        print(f'[INFO] Preserved mtime for {restored} unchanged files.')
+except Exception as e:
+    print(f'Warning: Failed to restore mtimes: {e}')
+" || true
 
     echo "$VERSION" > "$VERSION_STATE_FILE"
     cd "$PROJECT_ROOT"
@@ -277,15 +315,36 @@ readonly NINJA_CMD="nice -n 19 ionice -c 3 ninja"
 
 log_info "📊 Resource Strategy: $ninja_jobs threads with Low Priority (Nice 19 + Idle I/O)"
 
-# The Invariant: the fastest optimized GN args
-# Note: use_thin_lto=false requires is_cfi=false
-readonly COMMON_ARGS="is_debug=false is_official_build=true chrome_pgo_phase=0 use_thin_lto=true is_cfi=false use_lld=true symbol_level=0 blink_symbol_level=0 v8_symbol_level=0 proprietary_codecs=true ffmpeg_branding=\"Chrome\""
+# ───────────────────────────────────────────────────────────────
+# Per-Target GN Arguments
+# Each target gets its own cached argument set so changing one
+# never forces gn gen (and massive recompilation) on the other.
+# ───────────────────────────────────────────────────────────────
+# ⚠️ Isolate target-specific flags here.  COMMON_BASE is shared
+#    across all targets (safe to add to without triggering regen
+#    as long as the per-target hash is unchanged).
+COMMON_BASE="is_debug=false is_official_build=true chrome_pgo_phase=0 use_lld=true symbol_level=0 blink_symbol_level=0 v8_symbol_level=0 proprietary_codecs=true ffmpeg_branding=\"Chrome\""
+
+# ⚡ Per-target overrides — tune these without fear of cross-pollution.
+get_gn_args() {
+    local os_target="$1"
+    case "$os_target" in
+        linux)
+            echo "$COMMON_BASE target_os=\"linux\" use_thin_lto=true is_cfi=true"
+            ;;
+        win)
+            # NOTE: use_thin_lto=true + is_cfi=true crashes on Windows open.
+            # Both must be forced off for the Windows build.
+            echo "$COMMON_BASE target_os=\"win\" use_thin_lto=true is_cfi=false"
+            ;;
+    esac
+}
 
 # Functional Setup & Execution
 compile_and_release() {
     local readonly os_target="$1"
     local readonly out_dir="${SRC_DIR}/out/${os_target}"
-    local readonly gn_args="$COMMON_ARGS target_os=\"${os_target}\""
+    local readonly gn_args="$(get_gn_args "$os_target")"
     local target_name=""
     local release_file=""
 
@@ -297,14 +356,56 @@ compile_and_release() {
         target_name="mini_installer"
     fi
 
+    # ── Per-Target GN Arg Cache ─────────────────────────────────────────
+    # We hash the full argument string and store it per target so that
+    # gn gen (which triggers a full DAG rebuild) only runs when the args
+    # have actually changed for *this* target.  Changing Linux args will
+    # never re-gen the Windows out/ — and vice versa.
+    local readonly args_hash=$(echo "$gn_args" | md5sum | awk '{print $1}')
+    local readonly cache_file="${STATE_DIR}/gn_args_${os_target}"
+    local cached_hash=""
+    [[ -f "$cache_file" ]] && cached_hash=$(cat "$cache_file")
+
     log_info "⚙️ Configuring GN for $os_target..."
-    # 🪄 Fix: create all directories upfront before writing files
+
+    # Check if the Clang compiler binary is newer than the existing object files.
+    # If so, print a bold red alert and wipe the obsolete output directory to reclaim disk space.
+    local clang_bin="${SRC_DIR}/third_party/llvm-build/Release+Asserts/bin/clang"
+    if [[ -f "$clang_bin" ]]; then
+        local sample_o=$(find "$out_dir" -name "*.o" 2>/dev/null | head -n 1 || true)
+        if [[ -n "$sample_o" ]]; then
+            if [[ "$clang_bin" -nt "$sample_o" ]]; then
+                echo -e "\e[31m======================================================================\e[0m"
+                echo -e "\e[31m⚠️  WARNING: CLANG COMPILER TOOLCHAIN UPDATE DETECTED!\e[0m"
+                echo -e "\e[31m======================================================================\e[0m"
+                echo -e "\e[31mThe Clang compiler binary has been updated since your last build:\e[0m"
+                echo -e "\e[31m  - Compiler Time: $(stat -c '%y' "$clang_bin")\e[0m"
+                echo -e "\e[31m  - Object File:   $sample_o ($(stat -c '%y' "$sample_o"))\e[0m"
+                echo -e "\e[31m\e[1mBecause the compiler itself was updated, a FULL REBUILD is required.\e[0m"
+                echo -e "\e[31m🗑️  Wiping obsolete out_dir to reclaim disk space: $out_dir\e[0m"
+                echo -e "\e[31m======================================================================\e[0m"
+                if [[ -n "${out_dir:-}" ]]; then
+                    rm -rf "$out_dir"
+                fi
+            fi
+        fi
+    fi
+
     mkdir -p "$out_dir"
+
+    # Write args.gn only when content actually changes (preserves mtime).
+    # Ninja's self-regeneration rule treats args.gn as a dependency of
+    # build.ninja — a spurious mtime bump here triggers gn gen, which
+    # rewrites thousands of .ninja files and forces a full rebuild.
     echo "$gn_args" | write_if_changed "${out_dir}/args.gn"
 
-    # 🪄 Isolate State Mutation: run gn gen in a subshell to avoid affecting the main working directory
-    if [[ ! -f "${out_dir}/build.ninja" ]]; then
+    if [[ "$args_hash" != "$cached_hash" ]] || [[ ! -f "${out_dir}/build.ninja" ]]; then
+        log_info "🔄 GN args changed for $os_target — regenerating build.ninja..."
         ( cd "$SRC_DIR" && gn gen "$out_dir" )
+        echo "$args_hash" > "$cache_file"
+        log_info "✅ GN gen complete for $os_target (hash: ${args_hash:0:12})"
+    else
+        log_info "⏭️ GN args unchanged for $os_target — skipping gn gen"
     fi
 
     log_info "🔥 Igniting Ninja Engine ($ninja_jobs jobs) for $os_target..."
