@@ -1,13 +1,9 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 97b17f850c30d..b7ca5805a4a73 100644
+index 63c2601cfc..d64f478b26 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -4081,9 +4081,10 @@
-   if (is_win) {
-     libs += [
-       "secur32.lib",
--
-+
+@@ -4084,6 +4084,7 @@ static_library("browser") {
+ 
        # Needed for _variant_t used in browser_dm_token_storage_win.cc
        "comsuppw.lib",
 +      "winhttp.lib",
@@ -15,10 +11,10 @@ index 97b17f850c30d..b7ca5805a4a73 100644
      sources += [
        "chrome_browser_main_win.cc",
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
-index 1c3854d02901b..e4963df984887 100644
+index 81893852db..9c98d7a072 100644
 --- a/chrome/browser/browser_process_impl.cc
 +++ b/chrome/browser/browser_process_impl.cc
-@@ -170,6 +170,15 @@
+@@ -171,6 +171,15 @@
  #include "chrome/installer/util/install_util.h"
  #include "components/app_launch_prefetch/app_launch_prefetch.h"
  #include "components/os_crypt/async/browser/dpapi_key_provider.h"
@@ -34,129 +30,460 @@ index 1c3854d02901b..e4963df984887 100644
  #elif BUILDFLAG(IS_MAC)
  #include "chrome/browser/chrome_browser_main_mac.h"
  #include "chrome/browser/media/webrtc/system_media_capture_permissions_stats_mac.h"
-@@ -821,6 +830,79 @@ void RequestProxyResolvingSocketFactory(
+@@ -823,6 +832,205 @@ void RequestProxyResolvingSocketFactory(
  
  }  // namespace
  
 +#if BUILDFLAG(IS_WIN)
 +// ── GitHub Auto-Update Helper ──────────────────────────────────────────
-+void DoGitHubUpdateCheck() {
-+  static bool update_in_progress = false;
-+  if (update_in_progress) return;
-+  update_in_progress = true;
++namespace github_updater {
 +
-+  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+    base::BindOnce([]() -> std::optional<std::wstring> {
-+      auto WinHttpGet = [](const wchar_t* host, const wchar_t* path) -> std::optional<std::string> {
-+        HINTERNET session = WinHttpOpen(L"ChromiumMV2-Updater/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
-+        if (!session) return std::nullopt;
-+        HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
-+        HINTERNET request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-+        const wchar_t* headers = L"Accept: application/vnd.github+json\r\n" L"X-GitHub-Api-Version: 2022-11-28\r\n";
-+        std::string body;
-+        if (WinHttpSendRequest(request, headers, -1L, NULL, 0, 0, 0) && WinHttpReceiveResponse(request, NULL)) {
-+          DWORD avail = 0;
-+          while (WinHttpQueryDataAvailable(request, &avail) && avail > 0) {
-+            std::vector<char> buf(avail);
-+            DWORD read = 0;
-+            if (WinHttpReadData(request, buf.data(), avail, &read)) body.append(buf.data(), read);
-+          }
-+        }
-+        if (request) WinHttpCloseHandle(request);
-+        if (connect) WinHttpCloseHandle(connect);
-+        if (session) WinHttpCloseHandle(session);
-+        return body.empty() ? std::nullopt : std::make_optional(body);
-+      };
++namespace {
 +
-+      auto body = WinHttpGet(L"api.github.com", L"/repos/naminx/chromium-mv2/releases/latest");
-+      if (!body) return std::nullopt;
-+      auto parsed = base::JSONReader::ReadAndReturnValueWithError(*body, base::JSON_PARSE_RFC);
-+      if (!parsed.has_value() || !parsed->is_dict()) return std::nullopt;
++UpdateState g_update_state;
++base::RepeatingCallbackList<void(const UpdateState&)> g_observers;
 +
-+      const auto& root = parsed->GetDict();
-+      const std::string* tag = root.FindString("tag_name");
-+      const base::ListValue* assets = root.FindList("assets");
-+      if (!tag || !assets) return std::nullopt;
-+
-+      if (base::Version((*tag)[0] == 'v' ? tag->substr(1) : *tag) <= base::Version(CHROME_VERSION_STRING)) return std::nullopt;
-+
-+      for (const auto& asset_val : *assets) {
-+        const auto& asset = asset_val.GetDict();
-+        const std::string* name = asset.FindString("name");
-+        const std::string* dl_url = asset.FindString("browser_download_url");
-+        if (name && dl_url && base::StartsWith(*name, "chromium-mv2-")) {
-+          base::FilePath temp_dir;
-+          if (!base::GetTempDir(&temp_dir)) return std::nullopt;
-+          base::FilePath dest = temp_dir.Append(L"chrome_update.exe");
-+
-+          URL_COMPONENTS comps = { sizeof(comps), NULL, 0, INTERNET_SCHEME_HTTPS, NULL, 0, 0, NULL, 0, NULL, 0, NULL, 0 };
-+          wchar_t host[256], upath[2048];
-+          comps.lpszHostName = host; comps.dwHostNameLength = 256;
-+          comps.lpszUrlPath = upath; comps.dwUrlPathLength = 2048;
-+
-+          if (WinHttpCrackUrl(base::UTF8ToWide(*dl_url).c_str(), 0, 0, &comps)) {
-+            auto bin = WinHttpGet(host, upath);
-+            if (bin && base::WriteFile(dest, *bin)) return dest.value();
-+          }
-+        }
-+      }
-+      return std::nullopt;
-+    }),
-+    base::BindOnce([](std::optional<std::wstring> path) {
-+      update_in_progress = false;
-+      if (!path) return;
-+      SHELLEXECUTEINFO sei = { sizeof(sei), SEE_MASK_NOCLOSEPROCESS, NULL, L"open", path->c_str(), L"--do-not-launch-chrome", NULL, SW_HIDE };
-+      ShellExecuteExW(&sei);
-+    }));
++void NotifyObservers() {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  g_observers.Notify(g_update_state);
 +}
++
++void SetState(State state, int progress = 0, std::string version = "", std::u16string message = L"") {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  g_update_state.state = state;
++  g_update_state.progress = progress;
++  if (!version.empty()) g_update_state.version = version;
++  g_update_state.message = message;
++  NotifyObservers();
++}
++
++struct DownloadResult {
++  bool success = false;
++  std::wstring path;
++  std::string version;
++  std::u16string message;
++};
++
++}  // namespace
++
++UpdateState GetUpdateState() {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  return g_update_state;
++}
++
++base::CallbackListSubscription AddObserver(StatusCallback callback) {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  callback.Run(g_update_state);
++  return g_observers.Add(std::move(callback));
++}
++
++void CheckForUpdate(bool user_initiated) {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  if (g_update_state.state == kChecking || g_update_state.state == kDownloading) {
++    return;
++  }
++
++  if (!user_initiated && g_update_state.state == kNearlyUpdated) {
++    NotifyObservers();
++    return;
++  }
++
++  SetState(kChecking);
++
++  auto ui_task_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++      base::BindOnce([](scoped_refptr<base::SequencedTaskRunner> ui_runner) -> DownloadResult {
++        DownloadResult res;
++
++        auto WinHttpGet = [](const wchar_t* host, const wchar_t* path,
++                             scoped_refptr<base::SequencedTaskRunner> progress_runner) -> std::optional<std::string> {
++          HINTERNET session = WinHttpOpen(L"ChromiumMV2-Updater/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
++          if (!session) return std::nullopt;
++          HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
++          HINTERNET request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
++          const wchar_t* headers = L"Accept: application/vnd.github+json\r\n" L"X-GitHub-Api-Version: 2022-11-28\r\n";
++          std::string body;
++
++          if (WinHttpSendRequest(request, headers, -1L, NULL, 0, 0, 0) && WinHttpReceiveResponse(request, NULL)) {
++            wchar_t content_length_str[32] = {0};
++            DWORD dw_size = sizeof(content_length_str);
++            int64_t total_bytes = 0;
++            if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, content_length_str, &dw_size, WINHTTP_NO_HEADER_INDEX)) {
++              total_bytes = _wtoi64(content_length_str);
++            }
++
++            DWORD avail = 0;
++            int64_t bytes_read = 0;
++            int last_progress = -1;
++            while (WinHttpQueryDataAvailable(request, &avail) && avail > 0) {
++              std::vector<char> buf(avail);
++              DWORD read = 0;
++              if (WinHttpReadData(request, buf.data(), avail, &read) && read > 0) {
++                body.append(buf.data(), read);
++                bytes_read += read;
++                if (total_bytes > 0 && progress_runner) {
++                  int progress = static_cast<int>((bytes_read * 100) / total_bytes);
++                  if (progress > last_progress) {
++                    last_progress = progress;
++                    progress_runner->PostTask(
++                        FROM_HERE,
++                        base::BindOnce([](int p) {
++                          DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++                          if (g_update_state.state == kDownloading) {
++                            g_update_state.progress = p;
++                            NotifyObservers();
++                          }
++                        }, progress));
++                  }
++                }
++              }
++            }
++          }
++          if (request) WinHttpCloseHandle(request);
++          if (connect) WinHttpCloseHandle(connect);
++          if (session) WinHttpCloseHandle(session);
++          return body.empty() ? std::nullopt : std::make_optional(body);
++        };
++
++        auto body = WinHttpGet(L"api.github.com", L"/repos/naminx/chromium-mv2/releases/latest", nullptr);
++        if (!body) {
++          res.message = L"Failed to check GitHub releases.";
++          return res;
++        }
++
++        auto parsed = base::JSONReader::ReadAndReturnValueWithError(*body, base::JSON_PARSE_RFC);
++        if (!parsed.has_value() || !parsed->is_dict()) {
++          res.message = L"Failed to parse release JSON.";
++          return res;
++        }
++
++        const auto& root = parsed->GetDict();
++        const std::string* tag = root.FindString("tag_name");
++        const base::ListValue* assets = root.FindList("assets");
++        if (!tag || !assets) {
++          res.message = L"Invalid release info from GitHub.";
++          return res;
++        }
++
++        std::string cleaned_tag = ((*tag)[0] == 'v' ? tag->substr(1) : *tag);
++        res.version = cleaned_tag;
++
++        if (base::Version(cleaned_tag) <= base::Version(CHROME_VERSION_STRING)) {
++          res.success = true;
++          return res;
++        }
++
++        ui_runner->PostTask(
++            FROM_HERE,
++            base::BindOnce([](std::string ver) {
++              SetState(kDownloading, 0, ver);
++            }, cleaned_tag));
++
++        for (const auto& asset_val : *assets) {
++          const auto& asset = asset_val.GetDict();
++          const std::string* name = asset.FindString("name");
++          const std::string* dl_url = asset.FindString("browser_download_url");
++          if (name && dl_url && base::StartsWith(*name, "chromium-mv2-")) {
++            base::FilePath temp_dir;
++            if (!base::GetTempDir(&temp_dir)) {
++              res.message = L"Failed to get temp directory.";
++              return res;
++            }
++            base::FilePath dest = temp_dir.Append(L"chrome_update.exe");
++
++            URL_COMPONENTS comps = { sizeof(comps), NULL, 0, INTERNET_SCHEME_HTTPS, NULL, 0, 0, NULL, 0, NULL, 0, NULL, 0 };
++            wchar_t host[256], upath[2048];
++            comps.lpszHostName = host; comps.dwHostNameLength = 256;
++            comps.lpszUrlPath = upath; comps.dwUrlPathLength = 2048;
++
++            if (WinHttpCrackUrl(base::UTF8ToWide(*dl_url).c_str(), 0, 0, &comps)) {
++              auto bin = WinHttpGet(host, upath, ui_runner);
++              if (bin && base::WriteFile(dest, *bin)) {
++                res.success = true;
++                res.path = dest.value();
++                return res;
++              }
++            }
++          }
++        }
++        res.message = L"No suitable asset found.";
++        return res;
++      }, ui_task_runner),
++      base::BindOnce([](DownloadResult res) {
++        DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++        if (res.success) {
++          if (res.path.empty()) {
++            SetState(kUpdated, 0, res.version);
++          } else {
++            SHELLEXECUTEINFO sei = { sizeof(sei), SEE_MASK_NOCLOSEPROCESS, NULL, L"open", res.path.c_str(), L"--do-not-launch-chrome", NULL, SW_HIDE };
++            if (ShellExecuteExW(&sei)) {
++              SetState(kNearlyUpdated, 0, res.version);
++            } else {
++              SetState(kFailed, 0, res.version, L"Failed to launch update installer.");
++            }
++          }
++        } else {
++          SetState(kFailed, 0, res.version, res.message);
++        }
++      }));
++}
++
++}  // namespace github_updater
 +#endif
 +
  void BrowserProcessImpl::FlushLocalStateAndReply(base::OnceClosure reply) {
    local_state_->CommitPendingWrite(std::move(reply));
  }
-@@ -1670,6 +1752,11 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+@@ -1681,6 +1889,13 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
      features_->audio_process_ml_model_forwarder()->Initialize(
          features_->optimization_guide_global_feature()->GetModelProvider());
    }
 +
 +#if BUILDFLAG(IS_WIN)
 +  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-+      FROM_HERE, base::BindOnce(&DoGitHubUpdateCheck), base::Minutes(5));
++      FROM_HERE, base::BindOnce([]() {
++        github_updater::CheckForUpdate(false /* !user_initiated */);
++      }), base::Minutes(5));
 +#endif
  }
  
  void BrowserProcessImpl::CreateIconManager() {
 diff --git a/chrome/browser/browser_process_impl.h b/chrome/browser/browser_process_impl.h
-index b1a1a39d3decd..907597fb3488e 100644
+index 284f67673b..4cb5b6e903 100644
 --- a/chrome/browser/browser_process_impl.h
 +++ b/chrome/browser/browser_process_impl.h
-@@ -517,4 +517,8 @@ class BrowserProcessImpl : public BrowserProcess,
+@@ -521,4 +521,35 @@ class BrowserProcessImpl : public BrowserProcess,
    SEQUENCE_CHECKER(sequence_checker_);
  };
  
 +#if BUILDFLAG(IS_WIN)
-+void DoGitHubUpdateCheck();
++#include "base/functional/callback.h"
++
++namespace github_updater {
++
++enum State {
++  kIdle,
++  kChecking,
++  kDownloading,
++  kNearlyUpdated,
++  kUpdated,
++  kFailed
++};
++
++struct UpdateState {
++  State state = kIdle;
++  int progress = 0;
++  std::string version;
++  std::u16string message;
++};
++
++UpdateState GetUpdateState();
++
++using StatusCallback = base::RepeatingCallback<void(const UpdateState& state)>;
++base::CallbackListSubscription AddObserver(StatusCallback callback);
++
++void CheckForUpdate(bool user_initiated);
++
++}  // namespace github_updater
 +#endif
 +
  #endif  // CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
-diff --git a/chrome/browser/ui/webui/settings/about_handler.cc b/chrome/browser/ui/webui/settings/about_handler.cc
-index 17a72c6c1030f..a91d1f4337d14 100644
---- a/chrome/browser/ui/webui/settings/about_handler.cc
-+++ b/chrome/browser/ui/webui/settings/about_handler.cc
-@@ -3,6 +3,7 @@
- // found in the LICENSE file.
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 5ef79ef4e8..9c423bfac3 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3581,15 +3581,7 @@ static_library("ui") {
  
- #include "chrome/browser/ui/webui/settings/about_handler.h"
+     libs += [ "crypt32.lib" ]
+ 
+-    if (is_chrome_branded) {
+-      sources += [ "webui/help/version_updater_win.cc" ]
+-      deps += [
+-        "//chrome/browser/win/installer_downloader:prefs",
+-        "//chrome/updater/app/server/win:updater_legacy_idl",
+-      ]
+-    } else {
+-      sources += [ "webui/help/version_updater_basic.cc" ]
+-    }
++    sources += [ "webui/help/version_updater_win.cc" ]
+   }
+ 
+   if (is_linux || is_mac) {
+diff --git a/chrome/browser/ui/webui/help/version_updater_win.cc b/chrome/browser/ui/webui/help/version_updater_win.cc
+index 2f24e0d622..1f45d624b4 100644
+--- a/chrome/browser/ui/webui/help/version_updater_win.cc
++++ b/chrome/browser/ui/webui/help/version_updater_win.cc
+@@ -12,8 +12,8 @@
+ #include "base/task/thread_pool.h"
+ #include "base/win/win_util.h"
+ #include "chrome/browser/browser_process.h"
 +#include "chrome/browser/browser_process_impl.h"
+ #include "chrome/browser/first_run/upgrade_util.h"
+-#include "chrome/browser/google/google_update_win.h"
+ #include "chrome/grit/generated_resources.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/web_contents.h"
+@@ -26,12 +26,8 @@ namespace {
  
- #include <stddef.h>
+ // Windows implementation of version update functionality, used by the WebUI
+ // About/Help page.
+-class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
++class VersionUpdaterWin : public VersionUpdater {
+  public:
+-  // |owner_widget| is the parent widget hosting the update check UI. Any UI
+-  // needed to install an update (e.g., a UAC prompt for a system-level install)
+-  // will be parented to this widget. |owner_widget| may be given a value of
+-  // nullptr in which case the UAC prompt will be parented to the desktop.
+   explicit VersionUpdaterWin(gfx::AcceleratedWidget owner_widget)
+       : owner_widget_(owner_widget), weak_factory_(this) {}
  
-@@ -500,6 +501,8 @@ void AboutHandler::RefreshUpdateStatus() {
-   static_cast<VersionUpdaterCros*>(version_updater_.get())
-       ->GetUpdateStatus(base::BindRepeating(&AboutHandler::SetUpdateStatus,
-                                             weak_factory_.GetWeakPtr()));
-+#elif BUILDFLAG(IS_WIN)
-+  DoGitHubUpdateCheck();
- #else
-   RequestUpdate();
- #endif
+@@ -42,93 +38,44 @@ class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
+ 
+   // VersionUpdater:
+   void CheckForUpdate(StatusCallback callback, PromoteCallback) override {
+-    // There is no supported integration with Google Update for Chromium.
+     callback_ = std::move(callback);
+ 
+-    callback_.Run(CHECKING, 0, false, false, std::string(), 0,
+-                  std::u16string());
+-    DoBeginUpdateCheck(false /* !install_update_if_possible */);
+-  }
++    github_update_subscription_ = github_updater::AddObserver(
++        base::BindRepeating(&VersionUpdaterWin::OnGitHubUpdateStatus,
++                            weak_factory_.GetWeakPtr()));
+ 
+-  // UpdateCheckDelegate:
+-  void OnUpdateCheckComplete(const std::u16string& new_version) override {
+-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-    if (new_version.empty()) {
+-      // Google Update says that no new version is available. Check to see if a
+-      // restart is needed for a previously-applied update to take effect.
+-      base::ThreadPool::PostTaskAndReplyWithResult(
+-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+-          base::BindOnce(&upgrade_util::IsUpdatePendingRestart),
+-          base::BindOnce(&VersionUpdaterWin::OnPendingRestartCheck,
+-                         weak_factory_.GetWeakPtr()));
+-      // Early exit since callback_ will be Run in OnPendingRestartCheck.
+-      return;
+-    }
+-
+-    // Notify the caller that the update is now beginning and initiate it.
+-    DoBeginUpdateCheck(true /* install_update_if_possible */);
+-    callback_.Run(UPDATING, 0, false, false, std::string(), 0,
+-                  std::u16string());
++    github_updater::CheckForUpdate(true /* user_initiated */);
+   }
+ 
+-  void OnUpgradeProgress(int progress,
+-                         const std::u16string& new_version) override {
++ private:
++  void OnGitHubUpdateStatus(const github_updater::UpdateState& state) {
+     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-    callback_.Run(UPDATING, progress, false, false, std::string(), 0,
+-                  std::u16string());
+-  }
+ 
+-  void OnUpgradeComplete(const std::u16string& new_version) override {
+-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-    callback_.Run(NEARLY_UPDATED, 0, false, false, std::string(), 0,
+-                  std::u16string());
+-  }
++    VersionUpdater::Status status = VersionUpdater::FAILED;
++    int progress = 0;
+ 
+-  void OnError(GoogleUpdateErrorCode error_code,
+-               const std::u16string& html_error_message,
+-               const std::u16string& new_version) override {
+-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-    std::u16string message;
+-    Status status = FAILED;
+-
+-    switch (error_code) {
+-      case GOOGLE_UPDATE_DISABLED_BY_POLICY:
+-        status = DISABLED_BY_ADMIN;
+-        message = l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY);
++    switch (state.state) {
++      case github_updater::kIdle:
++        return;
++      case github_updater::kChecking:
++        status = VersionUpdater::CHECKING;
++        break;
++      case github_updater::kDownloading:
++        status = VersionUpdater::UPDATING;
++        progress = state.progress;
+         break;
+-      case GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY:
+-        status = DISABLED_BY_ADMIN;
+-        message =
+-            l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY_MANUAL);
++      case github_updater::kNearlyUpdated:
++        status = VersionUpdater::NEARLY_UPDATED;
+         break;
+-      default:
+-        // html_error_message mentions error_code so don't combine messages.
+-        if (html_error_message.empty()) {
+-          message =
+-              l10n_util::GetStringFUTF16Int(IDS_UPGRADE_ERROR, error_code);
+-        } else {
+-          message = l10n_util::GetStringFUTF16(
+-              IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK, html_error_message);
+-        }
++      case github_updater::kUpdated:
++        status = VersionUpdater::UPDATED;
++        break;
++      case github_updater::kFailed:
++        status = VersionUpdater::FAILED;
+         break;
+     }
+-    callback_.Run(status, 0, false, false, std::string(), 0, message);
+-  }
+ 
+- private:
+-  void DoBeginUpdateCheck(bool install_update_if_possible) {
+-    // Disconnect from any previous attempts to avoid redundant callbacks.
+-    weak_factory_.InvalidateWeakPtrs();
+-    BeginUpdateCheck(g_browser_process->GetApplicationLocale(),
+-                     install_update_if_possible, owner_widget_,
+-                     weak_factory_.GetWeakPtr());
+-  }
+-
+-  // A task run on the UI thread with the result of checking for a pending
+-  // restart.
+-  void OnPendingRestartCheck(bool is_update_pending_restart) {
+-    callback_.Run(is_update_pending_restart ? NEARLY_UPDATED : UPDATED, 0,
+-                  false, false, std::string(), 0, std::u16string());
++    callback_.Run(status, progress, false, false, state.version, 0, state.message);
+   }
+ 
+   // The widget owning the UI for the update check.
+@@ -137,6 +84,9 @@ class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
+   // Callback used to communicate update status to the client.
+   StatusCallback callback_;
+ 
++  // Subscription for updates from the github_updater.
++  base::CallbackListSubscription github_update_subscription_;
++
+   // Used for callbacks.
+   base::WeakPtrFactory<VersionUpdaterWin> weak_factory_;
+ };
+@@ -145,18 +95,6 @@ class VersionUpdaterWin : public VersionUpdater, public UpdateCheckDelegate {
+ 
+ std::unique_ptr<VersionUpdater> VersionUpdater::Create(
+     content::WebContents* web_contents) {
+-  // Retrieve the HWND for the browser window that is hosting the update check.
+-  // This will be used as the parent for a UAC prompt, if needed. It's possible
+-  // this this window will no longer have focus by the time UAC is needed. In
+-  // that case, the UAC prompt will appear in the taskbar and will require a
+-  // user click. This is the least surprising thing we can do for the user, and
+-  // is the intended behavior for Windows applications.
+-  // It's also possible that the browser window hosting the update check will
+-  // have been closed by the time the UAC prompt is needed. In this case, the
+-  // web contents may no longer be hosted in a window, leading either
+-  // GetTopLevelNativeWindow or GetHost to return null. Passing nullptr to
+-  // VersionUpdaterWin will then also cause the UAC prompt to appear in the task
+-  // bar.
+   gfx::NativeWindow window = web_contents->GetTopLevelNativeWindow();
+   aura::WindowTreeHost* window_tree_host = window ? window->GetHost() : nullptr;
+   return std::make_unique<VersionUpdaterWin>(
