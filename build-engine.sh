@@ -223,7 +223,7 @@ for patch_file in "${PATCHES_DIR}"/*.patch; do
         log_info "🩹 Patch changed: $p_name. Updating..."
         # Restore all files touched by either the old or new patch to avoid
         # stale state from overlapping patches.
-        files_to_restore=$( { git apply --numstat "$state_p" 2>/dev/null; git apply --numstat "$patch_file" 2>/dev/null; } | awk '{print $3}' | sort -u )
+        files_to_restore=$( { [[ -f "$state_p" ]] && git apply --numstat "$state_p" 2>/dev/null || true; git apply --numstat "$patch_file" 2>/dev/null || true; } | awk '{print $3}' | sort -u )
         if [[ -n "$files_to_restore" ]]; then
             git restore $files_to_restore 2>/dev/null || log_err "💥 Failed to restore files for patch $p_name"
         fi

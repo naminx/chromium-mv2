@@ -2,28 +2,14 @@ diff --git a/chrome/browser/ui/views/glic/glic_button.h b/chrome/browser/ui/view
 index 3446f4f9c6..9181bdea84 100644
 --- a/chrome/browser/ui/views/glic/glic_button.h
 +++ b/chrome/browser/ui/views/glic/glic_button.h
-@@ -191,7 +191,7 @@ class GlicButton : public GlicBaseShim<T>,
+@@ -191,6 +191,6 @@ class GlicButton : public GlicBaseShim<T>,
          hovered_callback_(std::move(hovered_callback)),
          mouse_down_callback_(std::move(mouse_down_callback)),
-         normal_icon_(GetNormalIcon()),
--        icon_for_highlight_(GetIconForHighlight()) {
-+        icon_for_highlight_((true) ? GetNormalIcon() : GetIconForHighlight()) { // to avoid unused function error
+         normal_icon_(GetNormalIcon(icon_size)),
+-        icon_for_highlight_(GetIconForHighlight(icon_size)) {
++        icon_for_highlight_((true) ? GetNormalIcon(icon_size) : GetIconForHighlight(icon_size)) { // to avoid unused function error
      Init(expansion_animation_done_callback, tooltip);
    }
- 
-diff --git a/chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.cc b/chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.cc
-index d706d996e2..450f1f683d 100644
---- a/chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.cc
-+++ b/chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.cc
-@@ -238,7 +238,7 @@ TabStripGlicButton::TabStripGlicButton(
-       hovered_callback_(std::move(hovered_callback)),
-       mouse_down_callback_(std::move(mouse_down_callback)),
-       normal_icon_(GetNormalIcon()),
--      icon_for_highlight_(GetIconForHighlight()),
-+      icon_for_highlight_((true) ? GetNormalIcon() : GetIconForHighlight()), // to avoid unused function error
-       width_animation_controller_(
-           std::make_unique<TabStripGlicButton::WidthAnimationController>(
-               *this,
 diff --git a/chrome/browser/glic/resources/glic_button.icon b/chrome/browser/glic/resources/glic_button.icon
 index a6dac62e45..76dbdf33b0 100644
 --- a/chrome/browser/glic/resources/glic_button.icon

@@ -2,14 +2,18 @@ diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
 index 97b17f850c30d..b7ca5805a4a73 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -5856,6 +5856,7 @@ static_library("browser") {
- 
+@@ -4081,9 +4081,10 @@
+   if (is_win) {
+     libs += [
+       "secur32.lib",
+-
++
        # Needed for _variant_t used in browser_dm_token_storage_win.cc
        "comsuppw.lib",
 +      "winhttp.lib",
      ]
      sources += [
-       "accessibility/caption_settings_dialog.h",
+       "chrome_browser_main_win.cc",
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
 index 1c3854d02901b..e4963df984887 100644
 --- a/chrome/browser/browser_process_impl.cc
