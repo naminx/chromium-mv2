@@ -11,10 +11,10 @@ index 63c2601cfc..d64f478b26 100644
      sources += [
        "chrome_browser_main_win.cc",
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
-index 81893852db..9c98d7a072 100644
+index 81893852db..f25c532a0c 100644
 --- a/chrome/browser/browser_process_impl.cc
 +++ b/chrome/browser/browser_process_impl.cc
-@@ -171,6 +171,15 @@
+@@ -171,6 +171,16 @@
  #include "chrome/installer/util/install_util.h"
  #include "components/app_launch_prefetch/app_launch_prefetch.h"
  #include "components/os_crypt/async/browser/dpapi_key_provider.h"
@@ -26,11 +26,12 @@ index 81893852db..9c98d7a072 100644
 +#include "base/files/file_util.h"          // for base::GetTempDir, base::WriteFile
 +#include "base/strings/string_util.h"      // for base::StartsWith
 +#include "base/strings/utf_string_conversions.h" // for base::UTF8ToWide
++#include "base/no_destructor.h"             // for base::NoDestructor
 +#include "chrome/common/chrome_version.h"  // for CHROME_VERSION_STRING
  #elif BUILDFLAG(IS_MAC)
  #include "chrome/browser/chrome_browser_main_mac.h"
  #include "chrome/browser/media/webrtc/system_media_capture_permissions_stats_mac.h"
-@@ -823,6 +832,205 @@ void RequestProxyResolvingSocketFactory(
+@@ -823,6 +833,220 @@ void RequestProxyResolvingSocketFactory(
  
  }  // namespace
  
@@ -40,20 +41,20 @@ index 81893852db..9c98d7a072 100644
 +
 +namespace {
 +
-+UpdateState g_update_state;
-+base::RepeatingCallbackList<void(const UpdateState&)> g_observers;
++base::NoDestructor<UpdateState> g_update_state;
++base::NoDestructor<base::RepeatingCallbackList<void(const UpdateState&)>> g_observers;
 +
 +void NotifyObservers() {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+  g_observers.Notify(g_update_state);
++  g_observers->Notify(*g_update_state);
 +}
 +
-+void SetState(State state, int progress = 0, std::string version = "", std::u16string message = L"") {
++void SetState(State state, int progress = 0, std::string version = "", std::u16string message = u"") {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+  g_update_state.state = state;
-+  g_update_state.progress = progress;
-+  if (!version.empty()) g_update_state.version = version;
-+  g_update_state.message = message;
++  g_update_state->state = state;
++  g_update_state->progress = progress;
++  if (!version.empty()) g_update_state->version = version;
++  g_update_state->message = message;
 +  NotifyObservers();
 +}
 +
@@ -68,22 +69,22 @@ index 81893852db..9c98d7a072 100644
 +
 +UpdateState GetUpdateState() {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+  return g_update_state;
++  return *g_update_state;
 +}
 +
 +base::CallbackListSubscription AddObserver(StatusCallback callback) {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+  callback.Run(g_update_state);
-+  return g_observers.Add(std::move(callback));
++  callback.Run(*g_update_state);
++  return g_observers->Add(std::move(callback));
 +}
 +
 +void CheckForUpdate(bool user_initiated) {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+  if (g_update_state.state == kChecking || g_update_state.state == kDownloading) {
++  if (g_update_state->state == kChecking || g_update_state->state == kDownloading) {
 +    return;
 +  }
 +
-+  if (!user_initiated && g_update_state.state == kNearlyUpdated) {
++  if (!user_initiated && g_update_state->state == kNearlyUpdated) {
 +    NotifyObservers();
 +    return;
 +  }
@@ -98,15 +99,29 @@ index 81893852db..9c98d7a072 100644
 +        DownloadResult res;
 +
 +        auto WinHttpGet = [](const wchar_t* host, const wchar_t* path,
++                             const wchar_t* headers,
 +                             scoped_refptr<base::SequencedTaskRunner> progress_runner) -> std::optional<std::string> {
 +          HINTERNET session = WinHttpOpen(L"ChromiumMV2-Updater/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
 +          if (!session) return std::nullopt;
 +          HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
 +          HINTERNET request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-+          const wchar_t* headers = L"Accept: application/vnd.github+json\r\n" L"X-GitHub-Api-Version: 2022-11-28\r\n";
 +          std::string body;
 +
-+          if (WinHttpSendRequest(request, headers, -1L, NULL, 0, 0, 0) && WinHttpReceiveResponse(request, NULL)) {
++          DWORD headers_len = headers ? -1L : 0;
++          if (WinHttpSendRequest(request, headers ? headers : WINHTTP_NO_ADDITIONAL_HEADERS, headers_len, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
++              WinHttpReceiveResponse(request, NULL)) {
++            DWORD status_code = 0;
++            DWORD status_code_size = sizeof(status_code);
++            if (WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
++                                    WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &status_code_size, WINHTTP_NO_HEADER_INDEX)) {
++              if (status_code < 200 || status_code >= 300) {
++                if (request) WinHttpCloseHandle(request);
++                if (connect) WinHttpCloseHandle(connect);
++                if (session) WinHttpCloseHandle(session);
++                return std::nullopt;
++              }
++            }
++
 +            wchar_t content_length_str[32] = {0};
 +            DWORD dw_size = sizeof(content_length_str);
 +            int64_t total_bytes = 0;
@@ -131,8 +146,8 @@ index 81893852db..9c98d7a072 100644
 +                        FROM_HERE,
 +                        base::BindOnce([](int p) {
 +                          DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-+                          if (g_update_state.state == kDownloading) {
-+                            g_update_state.progress = p;
++                          if (g_update_state->state == kDownloading) {
++                            g_update_state->progress = p;
 +                            NotifyObservers();
 +                          }
 +                        }, progress));
@@ -147,15 +162,16 @@ index 81893852db..9c98d7a072 100644
 +          return body.empty() ? std::nullopt : std::make_optional(body);
 +        };
 +
-+        auto body = WinHttpGet(L"api.github.com", L"/repos/naminx/chromium-mv2/releases/latest", nullptr);
++        const wchar_t* api_headers = L"Accept: application/vnd.github+json\r\n" L"X-GitHub-Api-Version: 2022-11-28\r\n";
++        auto body = WinHttpGet(L"api.github.com", L"/repos/naminx/chromium-mv2/releases/latest", api_headers, nullptr);
 +        if (!body) {
-+          res.message = L"Failed to check GitHub releases.";
++          res.message = u"Failed to check GitHub releases.";
 +          return res;
 +        }
 +
 +        auto parsed = base::JSONReader::ReadAndReturnValueWithError(*body, base::JSON_PARSE_RFC);
 +        if (!parsed.has_value() || !parsed->is_dict()) {
-+          res.message = L"Failed to parse release JSON.";
++          res.message = u"Failed to parse release JSON.";
 +          return res;
 +        }
 +
@@ -163,7 +179,7 @@ index 81893852db..9c98d7a072 100644
 +        const std::string* tag = root.FindString("tag_name");
 +        const base::ListValue* assets = root.FindList("assets");
 +        if (!tag || !assets) {
-+          res.message = L"Invalid release info from GitHub.";
++          res.message = u"Invalid release info from GitHub.";
 +          return res;
 +        }
 +
@@ -188,7 +204,7 @@ index 81893852db..9c98d7a072 100644
 +          if (name && dl_url && base::StartsWith(*name, "chromium-mv2-")) {
 +            base::FilePath temp_dir;
 +            if (!base::GetTempDir(&temp_dir)) {
-+              res.message = L"Failed to get temp directory.";
++              res.message = u"Failed to get temp directory.";
 +              return res;
 +            }
 +            base::FilePath dest = temp_dir.Append(L"chrome_update.exe");
@@ -199,7 +215,7 @@ index 81893852db..9c98d7a072 100644
 +            comps.lpszUrlPath = upath; comps.dwUrlPathLength = 2048;
 +
 +            if (WinHttpCrackUrl(base::UTF8ToWide(*dl_url).c_str(), 0, 0, &comps)) {
-+              auto bin = WinHttpGet(host, upath, ui_runner);
++              auto bin = WinHttpGet(host, upath, nullptr, ui_runner);
 +              if (bin && base::WriteFile(dest, *bin)) {
 +                res.success = true;
 +                res.path = dest.value();
@@ -208,7 +224,7 @@ index 81893852db..9c98d7a072 100644
 +            }
 +          }
 +        }
-+        res.message = L"No suitable asset found.";
++        res.message = u"No suitable asset found.";
 +        return res;
 +      }, ui_task_runner),
 +      base::BindOnce([](DownloadResult res) {
@@ -221,7 +237,7 @@ index 81893852db..9c98d7a072 100644
 +            if (ShellExecuteExW(&sei)) {
 +              SetState(kNearlyUpdated, 0, res.version);
 +            } else {
-+              SetState(kFailed, 0, res.version, L"Failed to launch update installer.");
++              SetState(kFailed, 0, res.version, u"Failed to launch update installer.");
 +            }
 +          }
 +        } else {
@@ -236,7 +252,7 @@ index 81893852db..9c98d7a072 100644
  void BrowserProcessImpl::FlushLocalStateAndReply(base::OnceClosure reply) {
    local_state_->CommitPendingWrite(std::move(reply));
  }
-@@ -1681,6 +1889,13 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+@@ -1681,6 +1905,13 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
      features_->audio_process_ml_model_forwarder()->Initialize(
          features_->optimization_guide_global_feature()->GetModelProvider());
    }

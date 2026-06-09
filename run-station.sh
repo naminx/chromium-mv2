@@ -59,6 +59,7 @@ docker run -d \
     --name "manie-engine" \
     --init \
     --cap-add SYS_ADMIN --device /dev/fuse \
+    --user "$(id -u):$(id -g)" \
     --ulimit nofile=65536:65536 \
     -v "${PROJECT_ROOT}:/chromium" \
     -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \

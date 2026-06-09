@@ -34,12 +34,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV TZ=Asia/Bangkok
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# Non-root builder user for FUSE-based builds
+RUN useradd -m builder
+
 # Install depot_tools globally
 RUN git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /depot_tools
 ENV PATH="/depot_tools:$PATH"
 ENV DEPOT_TOOLS_UPDATE=1
 # Bootstrap depot_tools (pre-download python3, etc.)
 RUN gclient --version
+RUN chown -R 1000:100 /depot_tools
 ENV DEPOT_TOOLS_UPDATE=0
 ENV DEPOT_TOOLS_METRICS=0
 

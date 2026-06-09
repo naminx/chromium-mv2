@@ -137,6 +137,9 @@ try:
     mtimes = {f: os.path.getmtime(f) for f in files if os.path.exists(f)}
     with open('/tmp/pre_checkout_mtimes.json', 'w') as out:
         json.dump(mtimes, out)
+    old_tree = subprocess.check_output(['git', 'rev-parse', 'HEAD:']).decode('utf-8').strip()
+    with open('/tmp/pre_checkout_tree.txt', 'w') as out:
+        out.write(old_tree)
 except Exception as e:
     print(f'Warning: Failed to save mtimes: {e}')
 " || true
@@ -150,12 +153,11 @@ except Exception as e:
 import subprocess, json, os
 try:
     try:
-        changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', 'ORIG_HEAD', 'HEAD']).decode('utf-8').splitlines())
+        with open('/tmp/pre_checkout_tree.txt') as f:
+            old_tree = f.read().strip()
+        changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', old_tree, 'HEAD']).decode('utf-8').splitlines())
     except Exception:
-        try:
-            changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', 'HEAD~1', 'HEAD']).decode('utf-8').splitlines())
-        except Exception:
-            changed = set()
+        changed = set()
     if os.path.exists('/tmp/pre_checkout_mtimes.json'):
         with open('/tmp/pre_checkout_mtimes.json') as f:
             mtimes = json.load(f)
@@ -167,6 +169,28 @@ try:
         print(f'[INFO] Preserved mtime for {restored} unchanged files.')
 except Exception as e:
     print(f'Warning: Failed to restore mtimes: {e}')
+" || true
+
+    # 6. 🪄 Touch changed JSON5/template inputs so Ninja reruns ALL dependent actions.
+    #     Without this, mtime restoration can cause some generation actions to be
+    #     skipped while others run, creating inconsistent generated files across
+    #     actions that share the same inputs (e.g. features_generated.h vs .cc).
+    log_info "⏰ Touching changed input files for generated code..."
+    python3 -c "
+import subprocess, os
+try:
+    with open('/tmp/pre_checkout_tree.txt') as f:
+        old_tree = f.read().strip()
+    changed = set(subprocess.check_output(['git', 'diff-tree', '-r', '--name-only', old_tree, 'HEAD']).decode('utf-8').splitlines())
+    touched = 0
+    for f in changed:
+        if f.endswith('.json5') or f.endswith('.tmpl') or f.endswith('.pdl'):
+            if os.path.exists(f):
+                os.utime(f, None)
+                touched += 1
+    print(f'[INFO] Touched {touched} JSON5/template inputs for Ninja regeneration.')
+except Exception as e:
+    print(f'Warning: Failed to touch inputs: {e}')
 " || true
 
     echo "$VERSION" > "$VERSION_STATE_FILE"
@@ -264,7 +288,7 @@ prepare_win_toolchain() {
     if ! mountpoint -q "${PROJECT_ROOT}/win_toolchain/vs_files"; then
         mkdir -p "${PROJECT_ROOT}/win_toolchain/vs_files.ciopfs" "${PROJECT_ROOT}/win_toolchain/vs_files"
         # Removed nonempty to ensure mount on truly empty directories
-        ciopfs -o use_ino,allow_other "${PROJECT_ROOT}/win_toolchain/vs_files.ciopfs" "${PROJECT_ROOT}/win_toolchain/vs_files"
+        ciopfs -o use_ino "${PROJECT_ROOT}/win_toolchain/vs_files.ciopfs" "${PROJECT_ROOT}/win_toolchain/vs_files"
     fi
 
     local dest="${PROJECT_ROOT}/win_toolchain/vs_files/${hash}"
@@ -354,6 +378,8 @@ compile_and_release() {
         rm -f "${out_dir}"/chromium-browser-stable_*.deb
     elif [[ "$os_target" == "win" ]]; then
         target_name="mini_installer"
+        # 🪄 ลบไฟล์ตัวติดตั้ง Windows เก่าใน out_dir เพื่อป้องกันไฟล์ตกค้าง
+        rm -f "${out_dir}"/mini_installer.exe
     fi
 
     # ── Per-Target GN Arg Cache ─────────────────────────────────────────
@@ -391,6 +417,28 @@ compile_and_release() {
         fi
     fi
 
+    # 🪄 Per-target major version change → clean build
+    #     Each target (linux/win) tracks its own last-built version so that
+    #     `--target all` can wipe out/linux before linux ninja and leave
+    #     out/win untouched until win's turn.
+    local version_file="${STATE_DIR}/last_version_${os_target}"
+    local last_target_version=""
+    [[ -f "$version_file" ]] && last_target_version=$(cat "$version_file")
+
+    # 🪄 Fallback: if per-target file doesn't exist yet, check the global
+    #    last_version (which tracks git checkout, not build success).
+    #    This handles the first run after this feature was introduced.
+    if [[ -z "$last_target_version" && -f "${STATE_DIR}/last_version" ]]; then
+        last_target_version=$(cat "${STATE_DIR}/last_version")
+    fi
+
+    local last_major="${last_target_version%%.*}"
+    local current_major="${VERSION%%.*}"
+    if [[ -n "$last_major" && "$last_major" != "$current_major" ]]; then
+        log_info "🗑️ Major version changed for $os_target: $last_major → $current_major. Wiping $out_dir..."
+        rm -rf "$out_dir"
+    fi
+
     mkdir -p "$out_dir"
 
     # Write args.gn only when content actually changes (preserves mtime).
@@ -412,6 +460,10 @@ compile_and_release() {
     # 🪄 Invoke the wrapped NINJA_CMD
     $NINJA_CMD -C "$out_dir" $target_name -j$ninja_jobs
 
+    # 🪄 Save per-target version only after successful build
+    echo "$VERSION" > "${STATE_DIR}/last_version_${os_target}"
+    log_info "✅ $os_target build successful for $VERSION"
+
     log_info "📦 Packaging and Uploading Artifacts..."
     local staging_dir="${PROJECT_ROOT}/release-staging"
     mkdir -p "$staging_dir"
@@ -420,12 +472,16 @@ compile_and_release() {
         if [[ -n "$src_file" ]]; then
             release_file="${staging_dir}/chromium-mv2-${VERSION}.deb"
             cp "$src_file" "$release_file"
+            # 🪄 ลบไฟล์ติดตั้ง Debian เก่าเพื่อประหยัดพื้นที่ดิสก์
+            find "$staging_dir" -maxdepth 1 -name "chromium-mv2-*.deb" ! -name "chromium-mv2-${VERSION}.deb" -delete
         fi
     elif [[ "$os_target" == "win" ]]; then
         src_file=$(ls -t ${out_dir}/mini_installer.exe 2>/dev/null | head -n 1 || true)
         if [[ -n "$src_file" ]]; then
             release_file="${staging_dir}/chromium-mv2-${VERSION}.exe"
             cp "$src_file" "$release_file"
+            # 🪄 ลบไฟล์ติดตั้ง Windows เก่าเพื่อประหยัดพื้นที่ดิสก์
+            find "$staging_dir" -maxdepth 1 -name "chromium-mv2-*.exe" ! -name "chromium-mv2-${VERSION}.exe" -delete
         fi
     fi
 
